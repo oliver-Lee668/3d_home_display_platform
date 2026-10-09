@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Environment, Lightformer, Grid } from '@react-three/drei'
+import { EffectComposer, SSAO, Bloom, Vignette } from '@react-three/postprocessing'
 import { Room } from './Room'
 import { PlacedItem } from './PlacedItem'
 import { CameraRig } from './CameraRig'
@@ -58,7 +59,7 @@ function RoomScene() {
       <directionalLight position={[0, height * 1.6, -lightDist * 1.1]} intensity={0.3} color="#cfe0ff" />
 
       {/* 本地生成的环境反射（不依赖网络），提升金属/家电质感 */}
-      <Environment resolution={256} frames={1}>
+      <Environment resolution={512} frames={1}>
         <Lightformer form="rect" intensity={2.4} color="#ffffff" position={[0, 5, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[8, 8, 1]} />
         <Lightformer form="rect" intensity={1.0} color="#dfe8ff" position={[-5, 2, 0]} rotation={[0, Math.PI / 2, 0]} scale={[8, 4, 1]} />
         <Lightformer form="rect" intensity={0.9} color="#fff3e2" position={[5, 2, 0]} rotation={[0, -Math.PI / 2, 0]} scale={[8, 4, 1]} />
@@ -86,6 +87,21 @@ function RoomScene() {
       )}
 
       <CameraRig />
+
+      {/* 照片级后处理：SSAO 接触暗角 + 轻微泛光 + 暗角，增强体积与真实感 */}
+      <EffectComposer multisampling={4} enableNormalPass>
+        <SSAO
+          intensity={14}
+          radius={0.12}
+          luminanceInfluence={0.6}
+          worldDistanceThreshold={20}
+          worldDistanceFalloff={0}
+          worldProximityThreshold={0.5}
+          worldProximityFalloff={0}
+        />
+        <Bloom intensity={0.22} luminanceThreshold={0.92} luminanceSmoothing={0.25} mipmapBlur />
+        <Vignette offset={0.22} darkness={0.5} />
+      </EffectComposer>
     </>
   )
 }

@@ -38,7 +38,7 @@ export const CATALOG: Product[] = [
     name: '北欧三人布艺沙发',
     category: 'sofa',
     size: { w: 2.1, h: 0.85, d: 0.92 },
-    model: { kind: 'procedural', ref: 'sofa' },
+    model: { kind: 'gltf', ref: '/models/GlamVelvetSofa.glb' },
     defaultMaterialId: 'grey',
     materials: [
       { id: 'grey', label: '雾灰', color: '#8a8f98', roughness: 0.9, metalness: 0 },
@@ -54,7 +54,7 @@ export const CATALOG: Product[] = [
     name: '单人休闲扶手椅',
     category: 'chair',
     size: { w: 0.82, h: 0.9, d: 0.85 },
-    model: { kind: 'procedural', ref: 'chair' },
+    model: { kind: 'gltf', ref: '/models/SheenChair.glb' },
     defaultMaterialId: 'olive',
     materials: [
       { id: 'olive', label: '橄榄绿', color: '#6b7247', roughness: 0.9 },
@@ -136,7 +136,7 @@ export const CATALOG: Product[] = [
     name: '对开门冰箱',
     category: 'fridge',
     size: { w: 0.83, h: 1.78, d: 0.68 },
-    model: { kind: 'procedural', ref: 'fridge' },
+    model: { kind: 'gltf', ref: '/models/CommercialRefrigerator.glb' },
     defaultMaterialId: 'steel',
     materials: [
       { id: 'steel', label: '拉丝银', color: '#c3c8cc', roughness: 0.35, metalness: 0.85 },
@@ -176,7 +176,7 @@ export const CATALOG: Product[] = [
     name: '绿植盆栽',
     category: 'decor',
     size: { w: 0.5, h: 1.3, d: 0.5 },
-    model: { kind: 'procedural', ref: 'plant' },
+    model: { kind: 'gltf', ref: '/models/DiffuseTransmissionPlant.glb' },
     defaultMaterialId: 'green',
     materials: [
       { id: 'green', label: '翠绿', color: '#3f7d3a', roughness: 0.85 },

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import type { RoomConfig, WallOpening } from '../types'
+import { makeWoodFloorTexture } from '../lib/textures'
 
 const WALL_T = 0.08 // 墙厚（用于门框/窗框进深）
 const FRAME_COLOR = '#e9e6e0'
@@ -134,6 +135,14 @@ function Opening({ o }: { o: WallOpening }) {
 export function Room({ room }: { room: RoomConfig }) {
   const { w, d, height } = room.size
 
+  // 程序化木地板贴图，按房间尺寸平铺（每格约 2m）
+  const floorTex = useMemo(() => {
+    const t = makeWoodFloorTexture(room.floorColor)
+    t.repeat.set(w / 2, d / 2)
+    return t
+  }, [room.floorColor, w, d])
+  useEffect(() => () => floorTex.dispose(), [floorTex])
+
   const northOpenings = room.openings.filter((o) => o.wall === 'north')
   const southOpenings = room.openings.filter((o) => o.wall === 'south')
   const westOpenings = room.openings.filter((o) => o.wall === 'west')
@@ -141,10 +150,10 @@ export function Room({ room }: { room: RoomConfig }) {
 
   return (
     <group>
-      {/* 地板（法线朝上） */}
+      {/* 地板（法线朝上，程序化木地板贴图） */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
         <planeGeometry args={[w, d]} />
-        <meshStandardMaterial color={room.floorColor} roughness={0.85} metalness={0} />
+        <meshStandardMaterial map={floorTex} roughness={0.6} metalness={0} />
       </mesh>
 
       {/* 天花板（法线朝下，从上方俯视时被剔除，可看入室内） */}

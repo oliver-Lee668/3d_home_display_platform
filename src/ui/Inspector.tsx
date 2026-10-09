@@ -73,7 +73,11 @@ export function Inspector() {
       </div>
 
       {/* 材质/颜色 */}
-      {product.materials.length > 1 && (
+      {product.model.kind === 'gltf' ? (
+        <p className="rounded-lg bg-white/5 px-2 py-1.5 text-[11px] leading-relaxed text-slate-400">
+          该商品为真实模型，材质为其自带 PBR 贴图，暂不支持换色。
+        </p>
+      ) : product.materials.length > 1 ? (
         <div>
           <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">材质 / 颜色</p>
           <div className="flex flex-wrap gap-2">
@@ -100,7 +104,7 @@ export function Inspector() {
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* 操作 */}
       <div className="mt-1 flex gap-2">
