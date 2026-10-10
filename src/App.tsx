@@ -6,6 +6,7 @@ import { Inspector } from './ui/Inspector'
 import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
 import { AdminConsole } from './ui/AdminConsole'
 import { useSceneStore } from './store/useSceneStore'
+import { useCatalogStore } from './store/useCatalogStore'
 import { APP_ROLE } from './lib/appRole'
 
 const ROT_STEP = Math.PI / 12 // 15°
@@ -34,6 +35,14 @@ function ShowroomApp() {
       setHash('')
     }
   }, [hash])
+
+  // 拉取销售端维护的目录（商品/地板）；后端不可用时自动回落内置基线
+  useEffect(() => {
+    void useCatalogStore.getState().refresh()
+    const onFocus = () => void useCatalogStore.getState().refresh()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
 
   // 首次进入：有已保存方案则加载，否则载入示例客厅布局
   useEffect(() => {

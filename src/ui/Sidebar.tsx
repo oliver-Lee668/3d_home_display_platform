@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { CATALOG, CATEGORY_META, CATEGORY_ORDER } from '../data/catalog'
+import { CATEGORY_META, CATEGORY_ORDER } from '../data/catalog'
 import type { Category } from '../types'
 import { useSceneStore } from '../store/useSceneStore'
+import { useCatalogStore } from '../store/useCatalogStore'
 import { Icon } from './icons'
 
 const TILE_COLORS: Record<Category, string> = {
@@ -22,16 +23,18 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
   const addItem = useSceneStore((s) => s.addItem)
+  // 目录为运行时数据：内置基线 + 销售端上传/替换/新增的商品
+  const catalog = useCatalogStore((s) => s.products)
 
   // 仅显示目录中真实存在的分类
   const categories = useMemo(
-    () => CATEGORY_ORDER.filter((c) => CATALOG.some((p) => p.category === c)),
-    [],
+    () => CATEGORY_ORDER.filter((c) => catalog.some((p) => p.category === c)),
+    [catalog],
   )
 
   const products = useMemo(
-    () => (filter === 'all' ? CATALOG : CATALOG.filter((p) => p.category === filter)),
-    [filter],
+    () => (filter === 'all' ? catalog : catalog.filter((p) => p.category === filter)),
+    [filter, catalog],
   )
 
   if (collapsed) {

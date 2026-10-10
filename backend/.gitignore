@@ -2,3 +2,9 @@
 /server.exe
 /*.log
 /probe_*.txt
+
+# 销售端上传的模型/贴图（运行时资产，不入库）
+/uploads/
+
+# 临时测试载荷
+/e*.json

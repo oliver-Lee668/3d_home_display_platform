@@ -5,16 +5,22 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"showroom-backend/internal/model"
 	"showroom-backend/internal/store"
 )
+
+// uploadDir 上传文件目录（相对 backend 工作目录，对外映射到 /uploads/）
+const uploadDir = "uploads"
 
 var (
 	st          store.Store
@@ -46,12 +52,24 @@ func main() {
 	}
 	orderSeq.Store(time.Now().UnixNano() % 10000)
 
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		log.Fatalf("[fatal] 创建上传目录失败：%v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", handleHealth)
 	mux.HandleFunc("POST /api/orders", handleCreateOrder)
 	mux.HandleFunc("GET /api/orders", handleListOrders)
 	mux.HandleFunc("GET /api/orders/{id}", handleGetOrder)
 	mux.HandleFunc("PATCH /api/orders/{id}/status", handleUpdateStatus)
+
+	// 目录条目：销售端上传/替换商品与地板，用户端拉取后与内置基线合并
+	mux.HandleFunc("GET /api/entries", handleListEntries)
+	mux.HandleFunc("POST /api/admin/entries", handleUpsertEntry)
+	mux.HandleFunc("PUT /api/admin/entries/{entryId}", handleUpsertEntryPath)
+	mux.HandleFunc("DELETE /api/admin/entries/{entryId}", handleDeleteEntry)
+	mux.HandleFunc("POST /api/admin/upload", handleUpload)
+	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
 
 	addr := ":" + envOr("PORT", "8080")
 	log.Println("订单服务监听", addr)
@@ -62,7 +80,7 @@ func main() {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -201,4 +219,106 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, o)
+}
+
+// ---------------- 目录条目 ----------------
+
+func handleListEntries(w http.ResponseWriter, _ *http.Request) {
+	list, err := st.ListEntries()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "查询目录条目失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+type entryReq struct {
+	EntryID string          `json:"entryId"`
+	Type    model.EntryType `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+func validEntryType(t model.EntryType) bool {
+	switch t {
+	case model.EntryProductOverride, model.EntryProductCustom, model.EntryProductDisable,
+		model.EntryFloorCustom, model.EntryFloorDisable:
+		return true
+	}
+	return false
+}
+
+func upsertEntry(w http.ResponseWriter, pathID string, r *http.Request) {
+	var req entryReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	id := pathID
+	if id == "" {
+		id = req.EntryID
+	}
+	if id == "" || !validEntryType(req.Type) {
+		writeErr(w, http.StatusBadRequest, "需要 entryId 与合法的 type")
+		return
+	}
+	e := &model.CatalogEntry{EntryID: id, Type: req.Type, Payload: req.Payload}
+	if err := st.UpsertEntry(e); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, e)
+}
+
+func handleUpsertEntry(w http.ResponseWriter, r *http.Request) { upsertEntry(w, "", r) }
+
+func handleUpsertEntryPath(w http.ResponseWriter, r *http.Request) {
+	upsertEntry(w, r.PathValue("entryId"), r)
+}
+
+func handleDeleteEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("entryId")
+	if err := st.DeleteEntry(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "entryId": id})
+}
+
+var allowedUploadExt = map[string]bool{
+	".glb": true, ".gltf": true, ".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
+}
+
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil { // 最大 64MB
+		writeErr(w, http.StatusBadRequest, "解析上传失败: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "缺少 file 字段")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if !allowedUploadExt[ext] {
+		writeErr(w, http.StatusBadRequest, "不支持的文件类型 "+ext+"（允许 glb/gltf/png/jpg/jpeg/webp）")
+		return
+	}
+	name := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), orderSeq.Add(1), ext)
+	dst, err := os.Create(filepath.Join(uploadDir, name))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "创建文件失败: "+err.Error())
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		writeErr(w, http.StatusInternalServerError, "写入文件失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"url":  "/" + uploadDir + "/" + name,
+		"name": header.Filename,
+		"size": header.Size,
+	})
 }

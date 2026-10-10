@@ -27,12 +27,12 @@ export const CATEGORY_ORDER: Category[] = [
 ]
 
 /**
- * 商品目录。
- * MVP 全部使用程序化占位模型（model.kind='procedural'）。
- * 替换真实模型：把 glTF/GLB 放入 public/models，再把对应条目的 model 改为
- * { kind: 'gltf', ref: '/models/xxx.glb' } 即可，无需改动其它代码。
+ * 商品目录内置基线。
+ * 销售端上传/替换/下架的变更以「目录条目」存在后端，启动时拉取并与本基线合并
+ * （见 store/useCatalogStore）。读取商品请统一用 getProduct() / getAllProducts()。
+ * MVP 大部分使用程序化占位模型（model.kind='procedural'）或 public/models 下的 glTF。
  */
-export const CATALOG: Product[] = [
+export const BUILTIN_CATALOG: Product[] = [
   {
     id: 'sofa-3p',
     name: '北欧三人布艺沙发',
@@ -212,11 +212,26 @@ export const CATALOG: Product[] = [
   },
 ]
 
-/** 按 id 快速查找商品 */
-export const PRODUCT_MAP: Record<string, Product> = Object.fromEntries(
-  CATALOG.map((p) => [p.id, p]),
-)
+// ------- 运行时目录（内置基线 + 销售端上传的条目合并结果）-------
+let RUNTIME: Product[] = BUILTIN_CATALOG
+let RUNTIME_MAP: Record<string, Product> = buildMap(RUNTIME)
 
+function buildMap(list: Product[]): Record<string, Product> {
+  return Object.fromEntries(list.map((p) => [p.id, p]))
+}
+
+/** 当前生效的完整商品列表（UI 订阅请改用 useCatalogStore） */
+export function getAllProducts(): Product[] {
+  return RUNTIME
+}
+
+/** 由目录同步逻辑调用，写入合并后的运行时目录 */
+export function setRuntimeProducts(list: Product[]): void {
+  RUNTIME = list
+  RUNTIME_MAP = buildMap(list)
+}
+
+/** 按 id 快速查找商品（含销售端新增的商品） */
 export function getProduct(id: string): Product | undefined {
-  return PRODUCT_MAP[id]
+  return RUNTIME_MAP[id]
 }

@@ -14,11 +14,12 @@ type memoryStore struct {
 	mu     sync.RWMutex
 	seq    int64
 	orders map[int64]*model.Order
+	entries map[string]*model.CatalogEntry
 }
 
 // NewMemory 创建内存存储
 func NewMemory() Store {
-	return &memoryStore{orders: map[int64]*model.Order{}}
+	return &memoryStore{orders: map[int64]*model.Order{}, entries: map[string]*model.CatalogEntry{}}
 }
 
 func (m *memoryStore) Ping() error { return nil }
@@ -74,5 +75,38 @@ func (m *memoryStore) Save(o *model.Order) error {
 	o.UpdatedAt = time.Now()
 	cp := *o
 	m.orders[o.ID] = &cp
+	return nil
+}
+
+func (m *memoryStore) ListEntries() ([]*model.CatalogEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*model.CatalogEntry, 0, len(m.entries))
+	for _, e := range m.entries {
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (m *memoryStore) UpsertEntry(e *model.CatalogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	if old, ok := m.entries[e.EntryID]; ok {
+		e.CreatedAt = old.CreatedAt
+	} else {
+		e.CreatedAt = now
+	}
+	e.UpdatedAt = now
+	cp := *e
+	m.entries[e.EntryID] = &cp
+	return nil
+}
+
+func (m *memoryStore) DeleteEntry(entryID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.entries, entryID)
 	return nil
 }

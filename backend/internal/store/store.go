@@ -15,4 +15,11 @@ type Store interface {
 	Get(id int64) (*model.Order, error)
 	// Save 整体回写（状态流转后）
 	Save(o *model.Order) error
+
+	// ListEntries 读取全部目录条目
+	ListEntries() ([]*model.CatalogEntry, error)
+	// UpsertEntry 新建或覆盖目录条目
+	UpsertEntry(e *model.CatalogEntry) error
+	// DeleteEntry 删除目录条目
+	DeleteEntry(entryID string) error
 }

@@ -29,6 +29,17 @@ const createTableSQL = `CREATE TABLE IF NOT EXISTS orders (
   KEY idx_created (created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
 
+const createEntriesTableSQL = `CREATE TABLE IF NOT EXISTS catalog_entries (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  entry_id      VARCHAR(64)     NOT NULL,
+  type          VARCHAR(24)     NOT NULL,
+  payload_json  LONGTEXT,
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_entry (entry_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
+
 // splitDSN 把 "user:pass@tcp(host:port)/dbname?params" 拆成 无库DSN 与 库名
 func splitDSN(dsn string) (base, dbname string, ok bool) {
 	i := strings.Index(dsn, ")/")
@@ -77,7 +88,10 @@ func ensureSchema(dsn string) error {
 		return err
 	}
 	defer db2.Close()
-	_, err = db2.Exec(createTableSQL)
+	if _, err = db2.Exec(createTableSQL); err != nil {
+		return err
+	}
+	_, err = db2.Exec(createEntriesTableSQL)
 	return err
 }
 
@@ -222,4 +236,40 @@ func scanOrders(rows *sql.Rows) ([]*model.Order, error) {
 		out = append(out, &o)
 	}
 	return out, rows.Err()
+}
+
+func (s *mysqlStore) ListEntries() ([]*model.CatalogEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT entry_id, type, payload_json, created_at, updated_at FROM catalog_entries ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.CatalogEntry{}
+	for rows.Next() {
+		var e model.CatalogEntry
+		var payload []byte
+		if err := rows.Scan(&e.EntryID, &e.Type, &payload, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		e.Payload = payload
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
+func (s *mysqlStore) UpsertEntry(e *model.CatalogEntry) error {
+	_, err := s.db.Exec(
+		`INSERT INTO catalog_entries (entry_id, type, payload_json)
+		 VALUES (?,?,?)
+		 ON DUPLICATE KEY UPDATE type = VALUES(type), payload_json = VALUES(payload_json)`,
+		e.EntryID, string(e.Type), string(e.Payload),
+	)
+	return err
+}
+
+func (s *mysqlStore) DeleteEntry(entryID string) error {
+	_, err := s.db.Exec(`DELETE FROM catalog_entries WHERE entry_id = ?`, entryID)
+	return err
 }
