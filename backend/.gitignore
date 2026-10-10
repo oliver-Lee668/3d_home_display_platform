@@ -1,5 +1,7 @@
 # 构建与运行产物
 /server.exe
+/server.exe~
+*.exe~
 /*.log
 /probe_*.txt
 
