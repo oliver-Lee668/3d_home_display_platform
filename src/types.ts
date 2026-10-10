@@ -73,7 +73,23 @@ export interface WallOpening {
   type: 'window' | 'door'
 }
 
-/** 预设房间配置 */
+/** 地板种类 */
+export type FloorKind = 'wood' | 'marble' | 'tile' | 'concrete' | 'carpet' | 'custom'
+
+/** 地板饰面（程序化贴图或自定义上传图） */
+export interface FloorFinish {
+  id: string
+  label: string
+  kind: FloorKind
+  /** 程序化贴图底色（custom 忽略） */
+  baseColor: string
+  /** UI 色板显示色 */
+  swatch: string
+  /** kind=custom 时的图片 dataURL */
+  image?: string
+}
+
+/** 房间配置（预设或用户定制） */
 export interface RoomConfig {
   id: string
   name: string
@@ -82,6 +98,10 @@ export interface RoomConfig {
   wallColor: string
   ceilingColor: string
   openings: WallOpening[]
+  /** 来源：preset 预设 / user 用户定制 */
+  source?: 'preset' | 'user'
+  /** 用户上传的参考照片 dataURL */
+  photo?: string
 }
 
 /** 视角模式：轨道观察 / 第一人称漫游 */
@@ -96,4 +116,6 @@ export interface SavedScheme {
   roomId: string
   items: PlacedItem[]
   savedAt: number
+  /** 保存时的地板饰面 */
+  floor?: FloorFinish
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import type { RoomConfig, WallOpening } from '../types'
-import { makeWoodFloorTexture } from '../lib/textures'
+import { makeFloorTexture } from '../lib/textures'
+import { useSceneStore } from '../store/useSceneStore'
 
 const WALL_T = 0.08 // 墙厚（用于门框/窗框进深）
 const FRAME_COLOR = '#e9e6e0'
@@ -135,12 +136,9 @@ function Opening({ o }: { o: WallOpening }) {
 export function Room({ room }: { room: RoomConfig }) {
   const { w, d, height } = room.size
 
-  // 程序化木地板贴图，按房间尺寸平铺（每格约 2m）
-  const floorTex = useMemo(() => {
-    const t = makeWoodFloorTexture(room.floorColor)
-    t.repeat.set(w / 2, d / 2)
-    return t
-  }, [room.floorColor, w, d])
+  // 地板贴图：取自全局地板饰面（预设或自定义上传），按房间尺寸平铺（每格约 2m）
+  const floor = useSceneStore((s) => s.floor)
+  const floorTex = useMemo(() => makeFloorTexture(floor, w / 2, d / 2), [floor, w, d])
   useEffect(() => () => floorTex.dispose(), [floorTex])
 
   const northOpenings = room.openings.filter((o) => o.wall === 'north')

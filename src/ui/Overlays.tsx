@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useSceneStore } from '../store/useSceneStore'
+import { getRoom } from '../data/rooms'
+import { Icon } from './icons'
 
 /** 顶部/底部轻提示 */
 export function Toast() {
@@ -27,6 +30,33 @@ export function RoamHint() {
         <span className="mx-2 text-slate-500">|</span>
         点击画面锁定视角 · <b className="text-brand-500">WASD</b>/方向键移动 ·
         <b className="text-brand-500"> Shift</b> 加速 · 鼠标转向 · <b className="text-brand-500">ESC</b> 释放
+      </div>
+    </div>
+  )
+}
+
+/** 用户定制房间的参考照片卡片（仅观察模式、有照片时显示） */
+export function PhotoRef() {
+  const viewMode = useSceneStore((s) => s.viewMode)
+  const roomId = useSceneStore((s) => s.roomId)
+  const [hidden, setHidden] = useState(false)
+  useEffect(() => setHidden(false), [roomId])
+  const room = getRoom(roomId)
+  if (viewMode !== 'orbit' || !room.photo || hidden) return null
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-20 z-20 -translate-x-1/2">
+      <div className="panel rounded-xl p-2 shadow-lg">
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <span className="text-[11px] text-slate-400">参考照片 · {room.name}</span>
+          <button
+            onClick={() => setHidden(true)}
+            className="rounded p-0.5 text-slate-400 hover:bg-white/10"
+            title="隐藏"
+          >
+            <Icon name="close" size={13} />
+          </button>
+        </div>
+        <img src={room.photo} alt="房间参考照片" className="max-h-44 w-auto rounded-lg object-contain" />
       </div>
     </div>
   )

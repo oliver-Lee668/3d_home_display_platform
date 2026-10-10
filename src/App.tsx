@@ -3,7 +3,7 @@ import { SceneRoot } from './three/SceneRoot'
 import { Toolbar } from './ui/Toolbar'
 import { Sidebar } from './ui/Sidebar'
 import { Inspector } from './ui/Inspector'
-import { Toast, RoamHint, HelpBar } from './ui/Overlays'
+import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
 import { useSceneStore } from './store/useSceneStore'
 
 const ROT_STEP = Math.PI / 12 // 15°
@@ -73,6 +73,7 @@ export default function App() {
       <Toolbar />
       <Sidebar />
       <Inspector />
+      <PhotoRef />
       <HelpBar />
       <RoamHint />
       <Toast />

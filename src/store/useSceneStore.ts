@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { PlacedItem, TransformMode, ViewMode } from '../types'
+import type { FloorFinish, PlacedItem, RoomConfig, TransformMode, ViewMode } from '../types'
 import { getProduct } from '../data/catalog'
-import { getRoom, ROOMS } from '../data/rooms'
+import { getRoom, ROOMS, addUserRoom, removeUserRoom } from '../data/rooms'
+import { DEFAULT_FLOOR } from '../data/floors'
 import { loadStoredScheme, storeScheme, clearStoredScheme } from '../lib/storage'
 import { findFreeSpot, footprint } from '../lib/placement'
 
@@ -23,6 +24,10 @@ interface SceneState {
   message: string | null
   /** 是否存在已保存方案（用于按钮可用性） */
   hasSaved: boolean
+  /** 当前地板饰面 */
+  floor: FloorFinish
+  /** 用户房间变更计数（触发房间切换器刷新） */
+  roomsVersion: number
 
   // actions
   addItem: (productId: string) => void
@@ -35,6 +40,12 @@ interface SceneState {
   setTransformMode: (mode: TransformMode) => void
   toggleGrid: () => void
   resetScene: () => void
+  /** 设置地板饰面 */
+  setFloor: (floor: FloorFinish) => void
+  /** 创建并切换到用户定制房间 */
+  createUserRoom: (cfg: RoomConfig) => void
+  /** 删除用户定制房间 */
+  deleteUserRoom: (id: string) => void
   saveScheme: () => void
   loadScheme: () => void
   /** 首次进入时加载一套客厅示例布局 */
@@ -66,6 +77,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   showGrid: false,
   message: null,
   hasSaved: loadStoredScheme() !== null,
+  floor: loadStoredScheme()?.floor ?? DEFAULT_FLOOR,
+  roomsVersion: 0,
 
   addItem: (productId) => {
     const product = getProduct(productId)
@@ -132,13 +145,34 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     get().notify('场景已清空')
   },
 
+  setFloor: (floor) => set({ floor }),
+
+  createUserRoom: (cfg) => {
+    addUserRoom(cfg)
+    set({ roomsVersion: get().roomsVersion + 1, roomId: cfg.id, items: [], selectedId: null })
+    get().notify(`已创建「${cfg.name}」`)
+  },
+
+  deleteUserRoom: (id) => {
+    removeUserRoom(id)
+    const cur = get().roomId
+    set({
+      roomsVersion: get().roomsVersion + 1,
+      roomId: cur === id ? ROOMS[0].id : cur,
+      items: [],
+      selectedId: null,
+    })
+    get().notify('已删除自定义房间')
+  },
+
   saveScheme: () => {
-    const { roomId, items } = get()
+    const { roomId, items, floor } = get()
     const ok = storeScheme({
       name: `${getRoom(roomId).name}方案`,
       roomId,
       items,
       savedAt: Date.now(),
+      floor,
     })
     set({ hasSaved: ok })
     get().notify(ok ? '方案已保存到本地' : '保存失败')
@@ -150,10 +184,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       get().notify('没有可加载的方案')
       return
     }
+    // 房间可能已被删除，回退到首个预设
+    const rid = getRoom(scheme.roomId).id === scheme.roomId ? scheme.roomId : ROOMS[0].id
     set({
-      roomId: scheme.roomId,
+      roomId: rid,
       items: scheme.items,
       selectedId: null,
+      floor: scheme.floor ?? get().floor,
     })
     get().notify('方案已加载')
   },

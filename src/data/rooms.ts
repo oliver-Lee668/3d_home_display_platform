@@ -1,4 +1,5 @@
 import type { RoomConfig } from '../types'
+import { loadUserRooms, storeUserRooms } from '../lib/storage'
 
 /**
  * 预设样板间。
@@ -40,6 +41,28 @@ export const ROOM_MAP: Record<string, RoomConfig> = Object.fromEntries(
   ROOMS.map((r) => [r.id, r]),
 )
 
+/** 用户定制房间（内存注册表 + localStorage 持久化） */
+let userRooms: RoomConfig[] = loadUserRooms()
+
+export function getUserRooms(): RoomConfig[] {
+  return userRooms
+}
+
+/** 预设 + 用户房间合并列表（供房间切换器） */
+export function getAllRooms(): RoomConfig[] {
+  return [...ROOMS, ...userRooms]
+}
+
+export function addUserRoom(cfg: RoomConfig): void {
+  userRooms = [...userRooms, cfg]
+  storeUserRooms(userRooms)
+}
+
+export function removeUserRoom(id: string): void {
+  userRooms = userRooms.filter((r) => r.id !== id)
+  storeUserRooms(userRooms)
+}
+
 export function getRoom(id: string): RoomConfig {
-  return ROOM_MAP[id] ?? ROOMS[0]
+  return ROOM_MAP[id] ?? userRooms.find((r) => r.id === id) ?? ROOMS[0]
 }

@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react'
-import { ROOMS } from '../data/rooms'
+import { useState, type ReactNode } from 'react'
+import { getAllRooms } from '../data/rooms'
 import { useSceneStore } from '../store/useSceneStore'
 import { takeScreenshot } from '../lib/screenshot'
 import type { IconName } from './icons'
 import { Icon } from './icons'
 import type { TransformMode } from '../types'
+import { FloorPicker } from './FloorPicker'
+import { RoomEditor } from './RoomEditor'
 
 export function Toolbar() {
   const roomId = useSceneStore((s) => s.roomId)
@@ -14,6 +16,7 @@ export function Toolbar() {
   const hasSelection = useSceneStore((s) => s.selectedId !== null)
   const hasSaved = useSceneStore((s) => s.hasSaved)
   const itemCount = useSceneStore((s) => s.items.length)
+  const roomsVersion = useSceneStore((s) => s.roomsVersion)
 
   const setRoom = useSceneStore((s) => s.setRoom)
   const setViewMode = useSceneStore((s) => s.setViewMode)
@@ -23,6 +26,11 @@ export function Toolbar() {
   const saveScheme = useSceneStore((s) => s.saveScheme)
   const loadScheme = useSceneStore((s) => s.loadScheme)
   const notify = useSceneStore((s) => s.notify)
+
+  const [floorOpen, setFloorOpen] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const rooms = getAllRooms()
+  void roomsVersion
 
   const handleRoom = (id: string) => {
     if (id === roomId) return
@@ -41,6 +49,7 @@ export function Toolbar() {
   }
 
   return (
+    <>
     <header className="pointer-events-none absolute left-3 right-3 top-3 z-30 flex flex-wrap items-center gap-2">
       {/* 品牌 */}
       <div className="panel pointer-events-auto flex items-center gap-2 rounded-xl px-3 py-2">
@@ -50,11 +59,18 @@ export function Toolbar() {
 
       {/* 房间切换 */}
       <div className="panel pointer-events-auto flex items-center gap-1 rounded-xl p-1">
-        {ROOMS.map((r) => (
+        {rooms.map((r) => (
           <SegBtn key={r.id} active={roomId === r.id} onClick={() => handleRoom(r.id)}>
             {r.name}
+            {r.source === 'user' && <span className="ml-1 text-[10px] text-brand-400">●</span>}
           </SegBtn>
         ))}
+      </div>
+
+      {/* 房间定制 / 地板 */}
+      <div className="panel pointer-events-auto flex items-center gap-1 rounded-xl p-1">
+        <SegBtn active={editorOpen} onClick={() => { setEditorOpen((v) => !v); setFloorOpen(false) }} icon="cube" label="定制房间" />
+        <SegBtn active={floorOpen} onClick={() => { setFloorOpen((v) => !v); setEditorOpen(false) }} icon="grid" label="地板" />
       </div>
 
       {/* 视角模式 */}
@@ -85,6 +101,10 @@ export function Toolbar() {
         <IconBtn onClick={handleReset} icon="trash" title="清空场景" disabled={itemCount === 0} danger />
       </div>
     </header>
+
+    {floorOpen && <FloorPicker onClose={() => setFloorOpen(false)} />}
+    {editorOpen && <RoomEditor onClose={() => setEditorOpen(false)} />}
+    </>
   )
 }
 
