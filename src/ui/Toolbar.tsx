@@ -77,11 +77,10 @@ export function Toolbar() {
         <SegBtn active={floorOpen} onClick={() => { setFloorOpen((v) => !v); setEditorOpen(false) }} icon="grid" label="地板" />
       </div>
 
-      {/* 下单 / 订单 / 管理台 */}
+      {/* 下单 / 订单（客户端不含管理台入口） */}
       <div className="panel pointer-events-auto flex items-center gap-1 rounded-xl p-1">
         <SegBtn active={checkoutOpen} onClick={() => { setCheckoutOpen((v) => !v); setOrdersOpen(false) }} icon="save" label="下单" />
         <SegBtn active={ordersOpen} onClick={() => { setOrdersOpen((v) => !v); setCheckoutOpen(false) }} icon="load" label="我的订单" />
-        <SegBtn active={false} onClick={() => { window.location.hash = '#/admin' }} icon="cube" label="管理台" />
       </div>
 
       {/* 视角模式 */}

@@ -6,7 +6,12 @@
   "description": "Web 3D 家具家电仿真展示平台 (MVP)",
   "scripts": {
     "dev": "vite",
+    "dev:sales": "vite --mode sales",
+    "dev:factory": "vite --mode factory",
     "build": "tsc && vite build",
+    "build:user": "tsc && vite build --mode user",
+    "build:sales": "tsc && vite build --mode sales",
+    "build:factory": "tsc && vite build --mode factory",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

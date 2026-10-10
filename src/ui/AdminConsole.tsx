@@ -3,11 +3,10 @@ import { api, type ApiOrder } from '../lib/api'
 import { statusColor, statusLabel } from '../lib/order'
 import { Icon } from './icons'
 
-type Role = '' | 'sales' | 'production'
-const ROLE_KEY = 'furniture-showroom:adminRole'
+type Role = 'sales' | 'production'
 const OPERATOR_KEY = 'furniture-showroom:adminOperator'
 
-const ROLE_LABEL: Record<Exclude<Role, ''>, string> = {
+const ROLE_LABEL: Record<Role, string> = {
   sales: '销售部',
   production: '生产部',
 }
@@ -28,10 +27,11 @@ function actionFor(role: Role, status: string): { action: string; label: string 
   return null
 }
 
-/** 生产/销售确认台（#/admin）：订单列表 + 按角色推进状态 */
-export function AdminConsole() {
-  const [role, setRole] = useState<Role>(() => (localStorage.getItem(ROLE_KEY) as Role) || '')
-  const [operator, setOperator] = useState(() => localStorage.getItem(OPERATOR_KEY) || '')
+/** 生产/销售确认台：角色由构建期 VITE_APP_ROLE 锁定，本端只能看到本部门界面 */
+export function AdminConsole({ role }: { role: Role }) {
+  const [operator, setOperator] = useState(
+    () => localStorage.getItem(OPERATOR_KEY) || (role === 'sales' ? '销售01' : '生产01'),
+  )
   const [orders, setOrders] = useState<ApiOrder[]>([])
   const [dbOk, setDbOk] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,16 +55,6 @@ export function AdminConsole() {
     return () => window.clearInterval(t)
   }, [load])
 
-  const pickRole = (r: Exclude<Role, ''>) => {
-    setRole(r)
-    localStorage.setItem(ROLE_KEY, r)
-    if (!operator) {
-      const def = r === 'sales' ? '销售01' : '生产01'
-      setOperator(def)
-      localStorage.setItem(OPERATOR_KEY, def)
-    }
-  }
-
   const act = async (o: ApiOrder, action: string, label: string) => {
     if (!operator.trim()) {
       window.alert('请先填写操作人姓名')
@@ -72,43 +62,13 @@ export function AdminConsole() {
     }
     setBusyId(o.id)
     try {
-      await api.updateStatus(o.id, action, `${ROLE_LABEL[role as Exclude<Role, ''>]}:${operator.trim()}`, label)
+      await api.updateStatus(o.id, action, `${ROLE_LABEL[role]}:${operator.trim()}`, label)
       await load()
     } catch (e) {
       window.alert(e instanceof Error ? e.message : '操作失败')
     } finally {
       setBusyId(null)
     }
-  }
-
-  // 角色选择页
-  if (!role) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-slate-900">
-        <div className="panel w-full max-w-sm rounded-2xl p-6 text-center">
-          <Icon name="cube" className="mx-auto mb-3 text-brand-500" size={30} />
-          <h2 className="text-base font-semibold text-slate-100">生产 / 销售确认台</h2>
-          <p className="mt-1 text-[12px] text-slate-400">选择你的部门以查看并处理定制订单</p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <button
-              onClick={() => pickRole('sales')}
-              className="rounded-xl border border-white/15 py-3 text-[13px] text-slate-100 hover:bg-white/10"
-            >
-              销售部
-            </button>
-            <button
-              onClick={() => pickRole('production')}
-              className="rounded-xl border border-white/15 py-3 text-[13px] text-slate-100 hover:bg-white/10"
-            >
-              生产部
-            </button>
-          </div>
-          <a href="#/" className="mt-4 inline-block text-[12px] text-slate-500 hover:text-slate-300">
-            ← 返回展示端
-          </a>
-        </div>
-      </div>
-    )
   }
 
   return (
@@ -144,18 +104,6 @@ export function AdminConsole() {
         >
           刷新
         </button>
-        <button
-          onClick={() => {
-            localStorage.removeItem(ROLE_KEY)
-            setRole('')
-          }}
-          className="rounded-lg px-2 py-1.5 text-[12px] text-slate-400 hover:bg-white/10"
-        >
-          切换部门
-        </button>
-        <a href="#/" className="text-[12px] text-slate-400 hover:text-slate-200">
-          返回展示端
-        </a>
       </header>
 
       {error && (

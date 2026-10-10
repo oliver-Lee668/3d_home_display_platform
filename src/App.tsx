@@ -6,17 +6,34 @@ import { Inspector } from './ui/Inspector'
 import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
 import { AdminConsole } from './ui/AdminConsole'
 import { useSceneStore } from './store/useSceneStore'
+import { APP_ROLE } from './lib/appRole'
 
 const ROT_STEP = Math.PI / 12 // 15°
 
 export default function App() {
-  // hash 路由：#/admin 进入生产/销售确认台，其余为展示端
+  // 构建期角色分流：销售/生产产物只渲染各自确认台；客户产物不含任何管理台入口
+  if (APP_ROLE === 'sales' || APP_ROLE === 'production') {
+    return <AdminConsole role={APP_ROLE} />
+  }
+  return <ShowroomApp />
+}
+
+/** 客户展示端：浏览 / 定制 / 下单 / 查单 */
+function ShowroomApp() {
   const [hash, setHash] = useState(() => window.location.hash)
   useEffect(() => {
     const onHash = () => setHash(window.location.hash)
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
+
+  // 客户端不暴露管理台：即使手动输入 #/admin 也回落到展示端
+  useEffect(() => {
+    if (hash.startsWith('#/admin')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      setHash('')
+    }
+  }, [hash])
 
   // 首次进入：有已保存方案则加载，否则载入示例客厅布局
   useEffect(() => {
@@ -70,10 +87,6 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  if (hash.startsWith('#/admin')) {
-    return <AdminConsole />
-  }
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-900">
