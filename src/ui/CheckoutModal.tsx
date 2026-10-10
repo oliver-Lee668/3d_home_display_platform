@@ -1,0 +1,171 @@
+import { useMemo, useState } from 'react'
+import { api } from '../lib/api'
+import { buildOrderLines, buildOrderPayload, linesTotal, setLastPhone, statusLabel } from '../lib/order'
+import { useSceneStore } from '../store/useSceneStore'
+import { Icon } from './icons'
+
+/** 确认下单模态：客户信息 + 定制清单 + 总价，提交后进入销售确认环节 */
+export function CheckoutModal({ onClose }: { onClose: () => void }) {
+  const notify = useSceneStore((s) => s.notify)
+  const lines = useMemo(() => buildOrderLines(), [])
+  const total = useMemo(() => linesTotal(lines), [lines])
+
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<{ orderNo: string; status: string } | null>(null)
+
+  const submit = async () => {
+    if (!name.trim() || !phone.trim()) {
+      setError('请填写姓名与手机号')
+      return
+    }
+    if (lines.length === 0) {
+      setError('场景中没有可下单的商品，请先摆放家具')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const payload = await buildOrderPayload({
+        name: name.trim(),
+        phone: phone.trim(),
+        note: note.trim() || undefined,
+      })
+      const order = await api.createOrder(payload)
+      setLastPhone(phone.trim())
+      setDone({ orderNo: order.orderNo, status: order.status })
+      notify('订单已提交，等待销售确认')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '提交失败，请检查后端服务')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+      <div className="panel flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Icon name="save" className="text-brand-500" size={18} />
+            <span className="text-sm font-semibold text-slate-100">确认下单</span>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white/10" title="关闭">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        {done ? (
+          <div className="flex-1 overflow-y-auto px-4 py-6 text-center">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+              <Icon name="save" size={26} />
+            </div>
+            <h3 className="text-base font-semibold text-slate-100">下单成功</h3>
+            <p className="mt-1 text-[13px] text-slate-400">
+              订单号 <b className="text-brand-400">{done.orderNo}</b>
+            </p>
+            <p className="mt-1 text-[13px] text-slate-400">
+              当前状态：<b style={{ color: '#f59e0b' }}>{statusLabel(done.status)}</b>
+            </p>
+            <p className="mx-auto mt-3 max-w-sm text-[12px] leading-relaxed text-slate-500">
+              订单已下发至公司：销售确认 → 生产确认 → 进入生产。可在「我的订单」中用手机号查询实时进度。
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-4 rounded-lg bg-brand-600 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-500"
+            >
+              完成
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              {/* 客户信息 */}
+              <section className="grid grid-cols-2 gap-3">
+                <label className="block text-[11px] text-slate-400">
+                  姓名 *
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-brand-500"
+                    placeholder="您的姓名"
+                  />
+                </label>
+                <label className="block text-[11px] text-slate-400">
+                  手机号 *
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-brand-500"
+                    placeholder="用于查询订单"
+                  />
+                </label>
+                <label className="col-span-2 block text-[11px] text-slate-400">
+                  备注（可选）
+                  <input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-brand-500"
+                    placeholder="交期 / 定制要求等"
+                  />
+                </label>
+              </section>
+
+              {/* 定制清单 */}
+              <section>
+                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-slate-400">
+                  定制清单（含当前空间快照）
+                </h3>
+                {lines.length === 0 ? (
+                  <p className="text-[12px] text-slate-500">场景为空，请先从商品库摆放家具。</p>
+                ) : (
+                  <div className="divide-y divide-white/5 rounded-lg border border-white/10">
+                    {lines.map((l, i) => (
+                      <div key={i} className="flex items-center justify-between px-3 py-2 text-[12px]">
+                        <span className="text-slate-200">
+                          {l.name}
+                          <span className="ml-2 text-slate-500">
+                            {l.materialLabel}
+                            {l.scale !== 1 ? ` · 缩放${l.scale.toFixed(2)}` : ''}
+                          </span>
+                        </span>
+                        <span className="text-slate-300">
+                          ×{l.qty}
+                          <span className="ml-2 text-amber-300">¥{(l.unitPrice * l.qty).toFixed(0)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center justify-between text-[13px]">
+                  <span className="text-slate-400">合计</span>
+                  <span className="font-semibold text-amber-300">¥{total.toFixed(2)}</span>
+                </div>
+              </section>
+
+              {error && (
+                <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{error}</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+              <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[13px] text-slate-300 hover:bg-white/10">
+                取消
+              </button>
+              <button
+                onClick={submit}
+                disabled={submitting}
+                className="rounded-lg bg-brand-600 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+              >
+                {submitting ? '提交中…' : '提交订单'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -1,14 +1,23 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { SceneRoot } from './three/SceneRoot'
 import { Toolbar } from './ui/Toolbar'
 import { Sidebar } from './ui/Sidebar'
 import { Inspector } from './ui/Inspector'
 import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
+import { AdminConsole } from './ui/AdminConsole'
 import { useSceneStore } from './store/useSceneStore'
 
 const ROT_STEP = Math.PI / 12 // 15°
 
 export default function App() {
+  // hash 路由：#/admin 进入生产/销售确认台，其余为展示端
+  const [hash, setHash] = useState(() => window.location.hash)
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   // 首次进入：有已保存方案则加载，否则载入示例客厅布局
   useEffect(() => {
     const s = useSceneStore.getState()
@@ -61,6 +70,10 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  if (hash.startsWith('#/admin')) {
+    return <AdminConsole />
+  }
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-900">

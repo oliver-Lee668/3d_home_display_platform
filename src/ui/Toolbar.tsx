@@ -7,6 +7,8 @@ import { Icon } from './icons'
 import type { TransformMode } from '../types'
 import { FloorPicker } from './FloorPicker'
 import { RoomEditor } from './RoomEditor'
+import { CheckoutModal } from './CheckoutModal'
+import { MyOrders } from './MyOrders'
 
 export function Toolbar() {
   const roomId = useSceneStore((s) => s.roomId)
@@ -29,6 +31,8 @@ export function Toolbar() {
 
   const [floorOpen, setFloorOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [ordersOpen, setOrdersOpen] = useState(false)
   const rooms = getAllRooms()
   void roomsVersion
 
@@ -73,6 +77,13 @@ export function Toolbar() {
         <SegBtn active={floorOpen} onClick={() => { setFloorOpen((v) => !v); setEditorOpen(false) }} icon="grid" label="地板" />
       </div>
 
+      {/* 下单 / 订单 / 管理台 */}
+      <div className="panel pointer-events-auto flex items-center gap-1 rounded-xl p-1">
+        <SegBtn active={checkoutOpen} onClick={() => { setCheckoutOpen((v) => !v); setOrdersOpen(false) }} icon="save" label="下单" />
+        <SegBtn active={ordersOpen} onClick={() => { setOrdersOpen((v) => !v); setCheckoutOpen(false) }} icon="load" label="我的订单" />
+        <SegBtn active={false} onClick={() => { window.location.hash = '#/admin' }} icon="cube" label="管理台" />
+      </div>
+
       {/* 视角模式 */}
       <div className="panel pointer-events-auto flex items-center gap-1 rounded-xl p-1">
         <SegBtn active={viewMode === 'orbit'} onClick={() => setViewMode('orbit')} icon="orbit" label="观察" />
@@ -104,6 +115,8 @@ export function Toolbar() {
 
     {floorOpen && <FloorPicker onClose={() => setFloorOpen(false)} />}
     {editorOpen && <RoomEditor onClose={() => setEditorOpen(false)} />}
+    {checkoutOpen && <CheckoutModal onClose={() => setCheckoutOpen(false)} />}
+    {ordersOpen && <MyOrders onClose={() => setOrdersOpen(false)} />}
     </>
   )
 }
