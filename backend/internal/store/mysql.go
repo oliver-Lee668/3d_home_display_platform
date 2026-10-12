@@ -40,6 +40,20 @@ const createEntriesTableSQL = `CREATE TABLE IF NOT EXISTS catalog_entries (
   UNIQUE KEY uk_entry (entry_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
 
+const createUsersTableSQL = `CREATE TABLE IF NOT EXISTS users (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  username      VARCHAR(64)     NOT NULL,
+  password_hash VARCHAR(255)    NOT NULL,
+  role          VARCHAR(16)     NOT NULL,
+  display_name  VARCHAR(64)     NOT NULL,
+  active        TINYINT(1)      NOT NULL DEFAULT 1,
+  must_change   TINYINT(1)      NOT NULL DEFAULT 0,
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_username (username)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
+
 // splitDSN 把 "user:pass@tcp(host:port)/dbname?params" 拆成 无库DSN 与 库名
 func splitDSN(dsn string) (base, dbname string, ok bool) {
 	i := strings.Index(dsn, ")/")
@@ -91,7 +105,10 @@ func ensureSchema(dsn string) error {
 	if _, err = db2.Exec(createTableSQL); err != nil {
 		return err
 	}
-	_, err = db2.Exec(createEntriesTableSQL)
+	if _, err = db2.Exec(createEntriesTableSQL); err != nil {
+		return err
+	}
+	_, err = db2.Exec(createUsersTableSQL)
 	return err
 }
 
@@ -170,6 +187,25 @@ func (s *mysqlStore) List(status, phone string) ([]*model.Order, error) {
 	}
 	q += ` ORDER BY created_at DESC, id DESC`
 	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanOrders(rows)
+}
+
+func (s *mysqlStore) Lookup(orderNo, phone string) ([]*model.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	phone = strings.TrimSpace(phone)
+	if orderNo == "" || phone == "" {
+		return []*model.Order{}, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT id, order_no, status, customer_json, room_json, items_json, history_json, total_amount, created_at, updated_at
+		 FROM orders
+		 WHERE order_no = ? AND JSON_UNQUOTE(JSON_EXTRACT(customer_json, '$.phone')) = ?
+		 ORDER BY created_at DESC, id DESC`, orderNo, phone,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -272,4 +308,80 @@ func (s *mysqlStore) UpsertEntry(e *model.CatalogEntry) error {
 func (s *mysqlStore) DeleteEntry(entryID string) error {
 	_, err := s.db.Exec(`DELETE FROM catalog_entries WHERE entry_id = ?`, entryID)
 	return err
+}
+
+// ---------------- 员工账号 ----------------
+
+const userCols = `id, username, password_hash, role, display_name, active, must_change, created_at, updated_at`
+
+func scanUser(row interface{ Scan(...any) error }) (*model.User, error) {
+	var u model.User
+	var active, mustChange int
+	if err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName,
+		&active, &mustChange, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		return nil, err
+	}
+	u.Active = active != 0
+	u.MustChange = mustChange != 0
+	return &u, nil
+}
+
+func (s *mysqlStore) GetUser(username string) (*model.User, error) {
+	row := s.db.QueryRow(`SELECT `+userCols+` FROM users WHERE username = ?`, strings.TrimSpace(username))
+	u, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
+}
+
+func (s *mysqlStore) GetUserByID(id int64) (*model.User, error) {
+	row := s.db.QueryRow(`SELECT `+userCols+` FROM users WHERE id = ?`, id)
+	u, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
+}
+
+func (s *mysqlStore) CreateUser(u *model.User) error {
+	now := time.Now()
+	active, mustChange := 0, 0
+	if u.Active {
+		active = 1
+	}
+	if u.MustChange {
+		mustChange = 1
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO users (username, password_hash, role, display_name, active, must_change, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		u.Username, u.PasswordHash, u.Role, u.DisplayName, active, mustChange, now, now,
+	)
+	if err != nil {
+		return err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	u.ID = id
+	u.CreatedAt = now
+	u.UpdatedAt = now
+	return nil
+}
+
+// UpdateUserPassword 改密；同时清除"必须修改初始密码"标记
+func (s *mysqlStore) UpdateUserPassword(id int64, hash string) error {
+	_, err := s.db.Exec(
+		`UPDATE users SET password_hash = ?, must_change = 0, updated_at = ? WHERE id = ?`,
+		hash, time.Now(), id,
+	)
+	return err
+}
+
+func (s *mysqlStore) CountUsers() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type ApiOrder } from '../lib/api'
-import { getLastPhone, statusColor, statusLabel } from '../lib/order'
+import { getLastOrderNo, getLastPhone, statusColor, statusLabel } from '../lib/order'
 import { Icon } from './icons'
 
 function fmtTime(iso: string): string {
@@ -10,29 +10,51 @@ function fmtTime(iso: string): string {
   return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** 我的订单：按手机号查询订单与生产进度 */
+/**
+ * 我的订单：订单号 + 手机号双因子自助查单。
+ *
+ * 客户端不做注册登录，但只凭手机号就能查单等于把别人的订单交给撞库：
+ * 手机号只有 11 位且可枚举。加上订单号后两个因子必须同时命中，
+ * 且后端对"订单不存在"与"手机号不匹配"返回同一文案，无法拿订单号探人。
+ */
 export function MyOrders({ onClose }: { onClose: () => void }) {
+  const [orderNo, setOrderNo] = useState(getLastOrderNo())
   const [phone, setPhone] = useState(getLastPhone())
   const [orders, setOrders] = useState<ApiOrder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // 只在首次挂载时用已记住的凭据自动查一次，之后必须点「查询」（避免边输边打接口）
+  const autoQueried = useRef(false)
 
-  const load = useCallback(async (p: string) => {
-    if (!p.trim()) {
-      setOrders([])
+  const load = useCallback(async (no: string, p: string) => {
+    const n = no.trim()
+    const ph = p.trim()
+    if (!n || !ph) {
+      setError('请同时填写订单号与下单手机号')
+      setOrders(null)
       return
     }
+    setBusy(true)
     try {
-      setOrders(await api.listOrders({ phone: p.trim() }))
+      setOrders(await api.lookupOrders(n, ph))
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '查询失败')
       setOrders(null)
+    } finally {
+      setBusy(false)
     }
   }, [])
 
   useEffect(() => {
-    void load(phone)
-  }, [phone, load])
+    if (autoQueried.current) return
+    autoQueried.current = true
+    if (orderNo.trim() && phone.trim()) void load(orderNo, phone)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const inputCls =
+    'flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-brand-500'
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
@@ -47,26 +69,40 @@ export function MyOrders({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="输入下单手机号查询"
-            className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-brand-500"
-          />
-          <button
-            onClick={() => void load(phone)}
-            className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
-          >
-            刷新
-          </button>
+        <div className="space-y-2 border-b border-white/10 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <input
+              value={orderNo}
+              onChange={(e) => setOrderNo(e.target.value)}
+              placeholder="订单号（下单成功页可看到）"
+              className={inputCls}
+            />
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="下单手机号"
+              className={inputCls}
+            />
+            <button
+              onClick={() => void load(orderNo, phone)}
+              disabled={busy}
+              className="shrink-0 rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10 disabled:opacity-50"
+            >
+              {busy ? '查询中…' : '查询'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-600">
+            为保障客户隐私，需同时提供订单号与下单手机号才能查看进度。
+          </p>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {error && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{error}</p>}
-          {!error && orders === null && <p className="text-[12px] text-slate-500">加载中…</p>}
+          {!error && orders === null && (
+            <p className="text-[12px] text-slate-500">填写订单号与手机号后点「查询」。</p>
+          )}
           {!error && orders !== null && orders.length === 0 && (
-            <p className="text-[12px] text-slate-500">暂无订单。先在场景中摆放家具并「确认下单」。</p>
+            <p className="text-[12px] text-slate-500">未查到订单。请核对订单号与手机号是否一致。</p>
           )}
           {orders?.map((o) => (
             <div key={o.id} className="rounded-xl border border-white/10 bg-black/20 p-3">

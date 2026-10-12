@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { resolveAssetUrl, type ApiOrder, type ApiOrderItem } from '../lib/api'
+import { api, type ApiDrawing, type ApiOrder, type ApiOrderItem } from '../lib/api'
 import { groupWorkOrder, laborText, orderToCsv, sizeText, workOrderTotals } from '../lib/order'
 import { downloadText } from '../lib/export'
 
@@ -10,6 +10,21 @@ function isCustomSize(it: ApiOrderItem): boolean {
 
 function exportCsv(order: ApiOrder) {
   downloadText(`工单_${order.orderNo}.csv`, orderToCsv(order), 'text/csv;charset=utf-8')
+}
+
+/**
+ * 下载图纸。
+ *
+ * 图纸（PDF/DWG/STEP 等）属商业机密，后端按扩展名鉴权，未登录一律 401。
+ * 而 <a download> 发起的是浏览器导航请求，带不上 Authorization 头，
+ * 所以这里必须走 fetch 拿 blob 再触发下载（已封装在 api.downloadDrawing）。
+ */
+async function saveDrawing(d: ApiDrawing) {
+  try {
+    await api.downloadDrawing(d.url, d.name)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '图纸下载失败')
+  }
 }
 
 /**
@@ -130,16 +145,14 @@ export function WorkOrderPanel({ order, onPrint }: { order: ApiOrder; onPrint: (
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
                         <span className="text-slate-500">图纸：</span>
                         {s.drawings.map((d, k) => (
-                          <a
+                          <button
                             key={k}
-                            href={resolveAssetUrl(d.url)}
-                            target="_blank"
-                            rel="noreferrer"
-                            download={d.name}
+                            type="button"
+                            onClick={() => void saveDrawing(d)}
                             className="rounded bg-white/5 px-1.5 py-0.5 text-brand-400 hover:bg-white/10"
                           >
                             ↓ {d.name}
-                          </a>
+                          </button>
                         ))}
                       </div>
                     )}

@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
-import { api } from '../lib/api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api, ApiError } from '../lib/api'
 import {
   buildOrderLines,
   buildOrderPayload,
   linesTotal,
   scaleIssues,
+  setLastOrderNo,
   setLastPhone,
   sizeText,
   statusLabel,
@@ -12,7 +13,7 @@ import {
 import { useSceneStore } from '../store/useSceneStore'
 import { Icon } from './icons'
 
-/** 确认下单模态：客户信息 + 定制清单 + 总价，提交后进入销售确认环节 */
+/** 确认下单模态：客户信息 + 定制清单 + 图形验证码 + 总价，提交后进入销售确认环节 */
 export function CheckoutModal({ onClose }: { onClose: () => void }) {
   const notify = useSceneStore((s) => s.notify)
   const lines = useMemo(() => buildOrderLines(), [])
@@ -26,6 +27,23 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ orderNo: string; status: string } | null>(null)
+  // 下单是公开接口，验证码是一次性的：提交后无论成败都作废，失败必须换一张
+  const [cap, setCap] = useState<{ id: string; image: string } | null>(null)
+  const [capAnswer, setCapAnswer] = useState('')
+
+  const refreshCaptcha = useCallback(async () => {
+    setCapAnswer('')
+    try {
+      const c = await api.captcha()
+      setCap({ id: c.id, image: c.image })
+    } catch {
+      setCap(null) // 后端不可用时保持空，提交时会报具体错
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshCaptcha()
+  }, [refreshCaptcha])
 
   const submit = async () => {
     if (!name.trim() || !phone.trim()) {
@@ -40,20 +58,31 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
       setError('存在超出工艺可行域的定制尺寸，请先调整')
       return
     }
+    if (!cap || !capAnswer.trim()) {
+      setError('请填写图形验证码')
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
-      const payload = await buildOrderPayload({
-        name: name.trim(),
-        phone: phone.trim(),
-        note: note.trim() || undefined,
-      })
+      const payload = await buildOrderPayload(
+        {
+          name: name.trim(),
+          phone: phone.trim(),
+          note: note.trim() || undefined,
+        },
+        { id: cap.id, answer: capAnswer.trim() },
+      )
       const order = await api.createOrder(payload)
       setLastPhone(phone.trim())
+      setLastOrderNo(order.orderNo)
       setDone({ orderNo: order.orderNo, status: order.status })
       notify('订单已提交，等待销售确认')
     } catch (e) {
-      setError(e instanceof Error ? e.message : '提交失败，请检查后端服务')
+      const msg = e instanceof Error ? e.message : '提交失败，请检查后端服务'
+      // 429 = 下单太频繁被限流；其余失败也把验证码换一张（旧的一次性凭据已作废）
+      setError(e instanceof ApiError && e.status === 429 ? `${msg}，请稍后再试` : msg)
+      await refreshCaptcha()
     } finally {
       setSubmitting(false)
     }
@@ -85,7 +114,10 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
               当前状态：<b style={{ color: '#f59e0b' }}>{statusLabel(done.status)}</b>
             </p>
             <p className="mx-auto mt-3 max-w-sm text-[12px] leading-relaxed text-slate-500">
-              订单已下发至公司：销售确认 → 生产确认 → 进入生产。可在「我的订单」中用手机号查询实时进度。
+              订单已下发至公司：销售确认 → 生产确认 → 进入生产。
+              <br />
+              请记下订单号，可在「我的订单」里用
+              <b className="text-slate-400">订单号 + 手机号</b>查询实时进度。
             </p>
             <button
               onClick={onClose}
@@ -169,6 +201,39 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
                 </div>
               </section>
 
+              {/* 图形验证码：下单是免登录的公开接口，靠它挡住脚本刷单 */}
+              <section>
+                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-slate-400">
+                  安全验证
+                </h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={capAnswer}
+                    onChange={(e) => setCapAnswer(e.target.value)}
+                    maxLength={4}
+                    inputMode="numeric"
+                    placeholder="输入图中 4 位数字"
+                    className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-[13px] tracking-widest text-slate-100 outline-none focus:border-brand-500"
+                  />
+                  {cap ? (
+                    <img
+                      src={cap.image}
+                      alt="验证码，点击刷新"
+                      title="看不清？点击换一张"
+                      onClick={() => void refreshCaptcha()}
+                      className="h-[38px] w-[114px] shrink-0 cursor-pointer rounded-lg border border-white/10 bg-white object-contain"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => void refreshCaptcha()}
+                      className="h-[38px] shrink-0 rounded-lg border border-dashed border-white/20 px-3 text-[11px] text-slate-400 hover:bg-white/10"
+                    >
+                      验证码加载失败，点击重试
+                    </button>
+                  )}
+                </div>
+              </section>
+
               {issues.length > 0 && (
                 <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
                   <p className="font-medium">以下定制尺寸超出工艺可行域，请回场景中调整后再下单：</p>
@@ -193,7 +258,7 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 onClick={submit}
-                disabled={submitting || issues.length > 0}
+                disabled={submitting || issues.length > 0 || !cap}
                 className="rounded-lg bg-brand-600 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
               >
                 {submitting ? '提交中…' : '提交订单'}

@@ -5,6 +5,7 @@ import { Sidebar } from './ui/Sidebar'
 import { Inspector } from './ui/Inspector'
 import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
 import { AdminConsole } from './ui/AdminConsole'
+import { LoginGate } from './ui/LoginGate'
 import { useSceneStore } from './store/useSceneStore'
 import { useCatalogStore } from './store/useCatalogStore'
 import { APP_ROLE } from './lib/appRole'
@@ -13,8 +14,13 @@ const ROT_STEP = Math.PI / 12 // 15°
 
 export default function App() {
   // 构建期角色分流：销售/生产产物只渲染各自确认台；客户产物不含任何管理台入口
+  // 员工端额外过一道登录门禁（真正的权限仍在后端逐请求校验）
   if (APP_ROLE === 'sales' || APP_ROLE === 'production') {
-    return <AdminConsole role={APP_ROLE} />
+    return (
+      <LoginGate endpoint={APP_ROLE}>
+        <AdminConsole role={APP_ROLE} />
+      </LoginGate>
+    )
   }
   return <ShowroomApp />
 }

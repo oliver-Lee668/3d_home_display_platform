@@ -75,9 +75,6 @@ export function buildOrderLines(): ApiOrderItem[] {
       qty: l.qty,
       scale: l.scale,
       sizeMm: { w: spec.sizeWmm, h: spec.sizeHmm, d: spec.sizeDmm },
-      craft: spec.craft,
-      packing: spec.packing,
-      laborMinutes: spec.laborMinutes,
     })
   }
   return lines
@@ -88,7 +85,14 @@ function toMM(meters: number, scale: number): number {
   return Math.round(meters * scale * 1000)
 }
 
-/** 根据商品与定制参数构造规格快照 */
+/**
+ * 根据商品与定制参数构造规格快照（客户端视角）。
+ *
+ * 只发客户端本来就该知道的字段：型号、分类、车间、标准尺寸、色号、可行域。
+ * 工艺 / 包装 / 工时 / 主材 SKU / 图纸属商业机密，由服务端 composeSpec 从
+ * entries 里的规格基线补全，客户端即便传了也会被丢弃——所以这里干脆不发，
+ * 既避免"看着像生效其实被覆盖"的误解，也顺带减小请求体。
+ */
 export function buildItemSpec(product: Product, materialId: string, scale: number): ApiItemSpec {
   const spec = product.spec
   const mat = product.materials.find((m) => m.id === materialId)
@@ -102,15 +106,10 @@ export function buildItemSpec(product: Product, materialId: string, scale: numbe
     sizeWmm: toMM(product.size.w, scale),
     sizeHmm: toMM(product.size.h, scale),
     sizeDmm: toMM(product.size.d, scale),
-    materialSku: spec?.materialSku,
     colorCode: mat?.color,
-    craft: spec?.craft,
-    packing: spec?.packing,
-    laborMinutes: spec?.laborMinutes,
+    // 可行域是公开的（缩放滑杆限位要用），服务端仍会用基线值覆盖
     scaleMin: spec?.scaleMin,
     scaleMax: spec?.scaleMax,
-    // 图纸保留后端相对路径，展示时再 resolveAssetUrl，避免写死部署地址
-    drawings: (spec?.drawings ?? []).map((d) => ({ name: d.name, url: d.url })),
   }
 }
 
@@ -297,9 +296,10 @@ export function shrinkDataUrl(dataUrl: string, max = 1024): Promise<string> {
   })
 }
 
-/** 组装下单请求体（含房间尺寸/地板/3D 快照） */
+/** 组装下单请求体（含房间尺寸/地板/3D 快照/图形验证码） */
 export async function buildOrderPayload(
   customer: { name: string; phone: string; note?: string },
+  captcha: { id: string; answer: string },
 ): Promise<CreateOrderPayload> {
   const s = useSceneStore.getState()
   const room = getRoom(s.roomId)
@@ -319,23 +319,46 @@ export async function buildOrderPayload(
     },
     items: lines,
     totalAmount: linesTotal(lines),
+    captchaId: captcha.id,
+    captchaAnswer: captcha.answer,
   }
 }
 
+/**
+ * 查单凭据记忆：「我的订单」需要订单号 + 手机号双因子，
+ * 下单成功后把两者存下来，客户回来查进度时免得手抄订单号。
+ */
 const LAST_PHONE_KEY = 'furniture-showroom:lastPhone'
+const LAST_ORDER_KEY = 'furniture-showroom:lastOrderNo'
 
-export function getLastPhone(): string {
+function readLocal(key: string): string {
   try {
-    return localStorage.getItem(LAST_PHONE_KEY) ?? ''
+    return localStorage.getItem(key) ?? ''
   } catch {
     return ''
   }
 }
 
-export function setLastPhone(phone: string): void {
+function writeLocal(key: string, value: string): void {
   try {
-    localStorage.setItem(LAST_PHONE_KEY, phone)
+    localStorage.setItem(key, value)
   } catch {
-    /* 忽略 */
+    /* 隐私模式下忽略 */
   }
+}
+
+export function getLastPhone(): string {
+  return readLocal(LAST_PHONE_KEY)
+}
+
+export function setLastPhone(phone: string): void {
+  writeLocal(LAST_PHONE_KEY, phone)
+}
+
+export function getLastOrderNo(): string {
+  return readLocal(LAST_ORDER_KEY)
+}
+
+export function setLastOrderNo(orderNo: string): void {
+  writeLocal(LAST_ORDER_KEY, orderNo)
 }

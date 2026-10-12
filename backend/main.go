@@ -56,39 +56,35 @@ func main() {
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		log.Fatalf("[fatal] 创建上传目录失败：%v", err)
 	}
+	seedUsers()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", handleHealth)
-	mux.HandleFunc("POST /api/orders", handleCreateOrder)
-	mux.HandleFunc("GET /api/orders", handleListOrders)
-	mux.HandleFunc("GET /api/orders/{id}", handleGetOrder)
-	mux.HandleFunc("PATCH /api/orders/{id}/status", handleUpdateStatus)
 
-	// 目录条目：销售端上传/替换商品与地板，用户端拉取后与内置基线合并
-	mux.HandleFunc("GET /api/entries", handleListEntries)
-	mux.HandleFunc("POST /api/admin/entries", handleUpsertEntry)
-	mux.HandleFunc("PUT /api/admin/entries/{entryId}", handleUpsertEntryPath)
-	mux.HandleFunc("DELETE /api/admin/entries/{entryId}", handleDeleteEntry)
-	mux.HandleFunc("POST /api/admin/upload", handleUpload)
-	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
+	// ---- 公开接口（客户免登录）----
+	mux.HandleFunc("GET /api/health", handleHealth)
+	mux.HandleFunc("POST /api/login", handleLogin)
+	mux.HandleFunc("GET /api/captcha", handleCaptcha)
+	mux.HandleFunc("POST /api/orders", handleCreateOrder)       // 限流 + 图形验证码
+	mux.HandleFunc("GET /api/orders/lookup", handleLookupOrder) // 订单号 + 手机号双因子
+	mux.HandleFunc("GET /api/entries", handleListEntries)       // 未登录自动脱敏
+
+	// ---- 员工接口（需登录；目录写入仅限销售/管理员）----
+	salesOnly := staffRoles(model.RoleSales, model.RoleAdmin)
+	mux.HandleFunc("GET /api/me", staff(handleMe))
+	mux.HandleFunc("POST /api/change-password", staff(handleChangePassword))
+	mux.HandleFunc("GET /api/orders", staff(handleListOrders))
+	mux.HandleFunc("GET /api/orders/{id}", staff(handleGetOrder))
+	mux.HandleFunc("PATCH /api/orders/{id}/status", staff(handleUpdateStatus))
+	mux.HandleFunc("POST /api/users", adminOnly(handleCreateUser))
+	mux.HandleFunc("POST /api/admin/entries", salesOnly(handleUpsertEntry))
+	mux.HandleFunc("PUT /api/admin/entries/{entryId}", salesOnly(handleUpsertEntryPath))
+	mux.HandleFunc("DELETE /api/admin/entries/{entryId}", salesOnly(handleDeleteEntry))
+	mux.HandleFunc("POST /api/admin/upload", salesOnly(handleUpload))
+	mux.HandleFunc("GET /uploads/", handleUploadAsset)
 
 	addr := ":" + envOr("PORT", "8080")
 	log.Println("订单服务监听", addr)
 	log.Fatal(http.ListenAndServe(addr, cors(mux)))
-}
-
-// cors 允许前端跨域调用（开发期全放开）
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -114,9 +110,28 @@ type createReq struct {
 	Room        model.RoomSnapshot `json:"room"`
 	Items       []model.OrderItem  `json:"items"`
 	TotalAmount float64            `json:"totalAmount"`
+	// 图形验证码：下单是公开接口，靠它挡住脚本刷单
+	CaptchaID     string `json:"captchaId"`
+	CaptchaAnswer string `json:"captchaAnswer"`
 }
 
+// 下单限流：同一 IP 每小时最多 10 单，同一手机号每小时最多 5 单
+const (
+	orderIPWindow    = time.Hour
+	orderIPMax       = 10
+	orderPhoneWindow = time.Hour
+	orderPhoneMax    = 5
+)
+
 func handleCreateOrder(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	ipKey := "order-ip:" + ip
+	if !rateLimiter.allow(ipKey, orderIPWindow, orderIPMax) {
+		w.Header().Set("Retry-After", strconv.Itoa(rateLimiter.retryAfter(ipKey, orderIPWindow)))
+		writeErr(w, http.StatusTooManyRequests, "下单过于频繁，请稍后再试或联系销售")
+		return
+	}
+
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求体解析失败")
@@ -130,35 +145,45 @@ func handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "订单至少包含一件商品")
 		return
 	}
+	// 验证码一次性消费：无论后续校验是否通过都作废，不可重放
+	if !captchas.consume(req.CaptchaID, req.CaptchaAnswer) {
+		writeErr(w, http.StatusBadRequest, "验证码不正确或已失效，请重新输入")
+		return
+	}
+	phoneKey := "order-phone:" + strings.TrimSpace(req.Customer.Phone)
+	if !rateLimiter.allow(phoneKey, orderPhoneWindow, orderPhoneMax) {
+		w.Header().Set("Retry-After", strconv.Itoa(rateLimiter.retryAfter(phoneKey, orderPhoneWindow)))
+		writeErr(w, http.StatusTooManyRequests, "该手机号下单过于频繁，请稍后再试")
+		return
+	}
 
-	// 依据目录主数据校验定制尺寸可行域，并以服务端重算冻结规格（防前端篡改）
-	limits, lerr := specLimits()
-	if lerr != nil {
-		log.Println("[warn] 读取规格可行域失败，跳过校验：", lerr)
+	// 规格快照由服务端组装：可行域以目录主数据为准，毫米尺寸重算，
+	// 工艺/包装/工时/主材/图纸等机密字段只从服务端基线取，客户端提交的一律丢弃。
+	baselines, berr := specBaselines()
+	if berr != nil {
+		log.Println("[warn] 读取规格主数据失败，本次下单将缺少工艺与图纸信息：", berr)
 	}
 	for i := range req.Items {
 		it := &req.Items[i]
 		if it.Scale <= 0 {
 			it.Scale = 1
 		}
-		lm := limits[it.ProductID]
-		if lm.min > 0 && it.Scale < lm.min-1e-9 {
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf(
-				"「%s」定制缩放 %.2f 低于工艺下限 %.2f，请调整后重新下单", it.Name, it.Scale, lm.min))
-			return
+		base := baselines[it.ProductID]
+		if base != nil {
+			if base.ScaleMin > 0 && it.Scale < base.ScaleMin-1e-9 {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+					"「%s」定制缩放 %.2f 低于工艺下限 %.2f（允许 ×%.2f ~ ×%.2f），请调整后重新下单",
+					it.Name, it.Scale, base.ScaleMin, base.ScaleMin, base.ScaleMax))
+				return
+			}
+			if base.ScaleMax > 0 && it.Scale > base.ScaleMax+1e-9 {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+					"「%s」定制缩放 %.2f 超出工艺上限 %.2f（允许 ×%.2f ~ ×%.2f），请调整后重新下单",
+					it.Name, it.Scale, base.ScaleMax, base.ScaleMin, base.ScaleMax))
+				return
+			}
 		}
-		if lm.max > 0 && it.Scale > lm.max+1e-9 {
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf(
-				"「%s」定制缩放 %.2f 超出工艺上限 %.2f，请调整后重新下单", it.Name, it.Scale, lm.max))
-			return
-		}
-		if it.Spec != nil {
-			it.Spec.SizeWMM = toMM(it.Spec.BaseSizeW * it.Scale)
-			it.Spec.SizeHMM = toMM(it.Spec.BaseSizeH * it.Scale)
-			it.Spec.SizeDMM = toMM(it.Spec.BaseSizeD * it.Scale)
-			it.Spec.ScaleMin = lm.min
-			it.Spec.ScaleMax = lm.max
-		}
+		it.Spec = composeSpec(it.Spec, base, it.Scale)
 	}
 	o := &model.Order{
 		OrderNo:     genOrderNo(),
@@ -178,7 +203,57 @@ func handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "创建订单失败: "+err.Error())
 		return
 	}
+	log.Printf("[order] %s 新建订单 %s（%d 行，¥%.2f）来自 %s", req.Customer.Name, o.OrderNo, len(o.Items), o.TotalAmount, ip)
 	writeJSON(w, http.StatusCreated, o)
+}
+
+// handleCaptcha 签发一张图形验证码（公开接口，限流）
+func handleCaptcha(w http.ResponseWriter, r *http.Request) {
+	key := "captcha-ip:" + clientIP(r)
+	if !rateLimiter.allow(key, 10*time.Minute, 60) {
+		w.Header().Set("Retry-After", strconv.Itoa(rateLimiter.retryAfter(key, 10*time.Minute)))
+		writeErr(w, http.StatusTooManyRequests, "验证码请求过于频繁，请稍后再试")
+		return
+	}
+	id, dataURL, err := captchas.issue()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "验证码暂不可用："+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":        id,
+		"image":     dataURL,
+		"expiresIn": int(captchaTTL.Seconds()),
+	})
+}
+
+// handleLookupOrder 客户端自助查单：必须同时提供订单号与下单手机号。
+// 只凭手机号可查全部订单是不可接受的（号段可枚举、销售手里就有客户号码）。
+func handleLookupOrder(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	key := "lookup-ip:" + ip
+	if !rateLimiter.allow(key, lookupWindow, lookupMax) {
+		w.Header().Set("Retry-After", strconv.Itoa(rateLimiter.retryAfter(key, lookupWindow)))
+		writeErr(w, http.StatusTooManyRequests, "查询过于频繁，请稍后再试")
+		return
+	}
+	orderNo := strings.TrimSpace(r.URL.Query().Get("orderNo"))
+	phone := strings.TrimSpace(r.URL.Query().Get("phone"))
+	if orderNo == "" || phone == "" {
+		writeErr(w, http.StatusBadRequest, "请同时提供订单号与下单手机号")
+		return
+	}
+	list, err := st.Lookup(orderNo, phone)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "查询失败: "+err.Error())
+		return
+	}
+	if len(list) == 0 {
+		// 不区分“订单不存在”与“手机号不匹配”，避免被用来探测订单号是否存在
+		writeErr(w, http.StatusNotFound, "未找到与该订单号、手机号匹配的订单")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 func genOrderNo() string {
@@ -188,37 +263,6 @@ func genOrderNo() string {
 
 // toMM 米转毫米（四舍五入）
 func toMM(meters float64) int { return int(math.Round(meters * 1000)) }
-
-type scaleLimit struct{ min, max float64 }
-
-// specLimits 从目录条目中汇总每个商品的定制缩放可行域（销售端维护的规格主数据）
-func specLimits() (map[string]scaleLimit, error) {
-	out := map[string]scaleLimit{}
-	list, err := st.ListEntries()
-	if err != nil {
-		return out, err
-	}
-	for _, e := range list {
-		if e.Type != model.EntryProductOverride && e.Type != model.EntryProductCustom {
-			continue
-		}
-		if len(e.Payload) == 0 {
-			continue
-		}
-		var p struct {
-			ID   string `json:"id"`
-			Spec *struct {
-				ScaleMin float64 `json:"scaleMin"`
-				ScaleMax float64 `json:"scaleMax"`
-			} `json:"spec"`
-		}
-		if err := json.Unmarshal(e.Payload, &p); err != nil || p.ID == "" || p.Spec == nil {
-			continue
-		}
-		out[p.ID] = scaleLimit{min: p.Spec.ScaleMin, max: p.Spec.ScaleMax}
-	}
-	return out, nil
-}
 
 func handleListOrders(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
@@ -247,7 +291,7 @@ func handleGetOrder(w http.ResponseWriter, r *http.Request) {
 
 type statusReq struct {
 	Action string `json:"action"`
-	By     string `json:"by"`
+	By     string `json:"by"` // 已废弃：操作人一律取自登录 token，前端传什么都会被覆盖
 	Note   string `json:"note"`
 }
 
@@ -260,6 +304,17 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req statusReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	c := claimsOf(r)
+	// 动作级权限：只校状态机不够，生产角色不能代销售确认
+	if !model.KnownAction(req.Action) {
+		writeErr(w, http.StatusBadRequest, "未知动作: "+req.Action)
+		return
+	}
+	if !model.CanPerformAction(c.Role, req.Action) {
+		writeErr(w, http.StatusForbidden,
+			fmt.Sprintf("%s无权执行「%s」", model.RoleLabel[c.Role], model.ActionLabel[req.Action]))
 		return
 	}
 	if model.NeedsNote(req.Action) && strings.TrimSpace(req.Note) == "" {
@@ -277,9 +332,10 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Status = next
+	// 操作人取自 token（可追溯到真实账号），不再相信前端传来的名字
 	o.History = append(o.History, model.HistoryEntry{
 		Status: next,
-		By:     req.By,
+		By:     model.RoleLabel[c.Role] + ":" + c.Name,
 		At:     time.Now(),
 		Note:   req.Note,
 	})
@@ -287,16 +343,22 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "保存失败: "+err.Error())
 		return
 	}
+	log.Printf("[order] %s(%s) 将订单 %s %s → %s", c.Name, c.Role, o.OrderNo, model.ActionLabel[req.Action], next)
 	writeJSON(w, http.StatusOK, o)
 }
 
 // ---------------- 目录条目 ----------------
 
-func handleListEntries(w http.ResponseWriter, _ *http.Request) {
+// handleListEntries 目录条目。未登录（客户端）返回脱敏视图：
+// spec 里的工艺、包装、工时、主材编码与图纸清单一律剔除，只留型号与定制可行域。
+func handleListEntries(w http.ResponseWriter, r *http.Request) {
 	list, err := st.ListEntries()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "查询目录条目失败: "+err.Error())
 		return
+	}
+	if parseClaims(r) == nil {
+		list = sanitizeEntries(list)
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -359,6 +421,33 @@ var allowedUploadExt = map[string]bool{
 	// 图纸/工艺文件
 	".pdf": true, ".dwg": true, ".dxf": true, ".step": true, ".stp": true,
 	".iges": true, ".igs": true, ".zip": true,
+}
+
+// drawingExts 属于生产机密的图纸类文件：下载必须持员工会话。
+// 模型与贴图仍公开（客户端要渲染商品与地板），仅按扩展名区分。
+var drawingExts = map[string]bool{
+	".pdf": true, ".dwg": true, ".dxf": true, ".step": true, ".stp": true,
+	".iges": true, ".igs": true, ".zip": true,
+}
+
+// handleUploadAsset 上传资产静态服务：图纸类需登录，且强制作为附件下载。
+func handleUploadAsset(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	// 防目录穿越：清之后的路径不得再包含分隔符或上级引用
+	if name == "" || name != filepath.Base(filepath.Clean(name)) || strings.Contains(name, "..") {
+		writeErr(w, http.StatusBadRequest, "非法路径")
+		return
+	}
+	if drawingExts[strings.ToLower(filepath.Ext(name))] {
+		if parseClaims(r) == nil {
+			writeErr(w, http.StatusUnauthorized, "图纸仅限已登录员工下载")
+			return
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	}
+	// 不尝试推断 MIME，避免上传的 SVG/HTML 被当作页面执行造成 XSS
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))).ServeHTTP(w, r)
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {

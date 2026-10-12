@@ -1,6 +1,6 @@
 import { useState, useRef, type ChangeEvent } from 'react'
 import type { Product, ProductSpec } from '../types'
-import { API_BASE, resolveAssetUrl } from '../lib/api'
+import { api, API_BASE } from '../lib/api'
 import { useCatalogStore } from '../store/useCatalogStore'
 
 const DRAWING_EXT = '.pdf,.dwg,.dxf,.step,.stp,.iges,.igs,.zip'
@@ -8,6 +8,16 @@ const DRAWING_EXT = '.pdf,.dwg,.dxf,.step,.stp,.iges,.igs,.zip'
 /** 图纸一律存后端相对路径，避免把部署地址写进数据库 */
 function toRelative(url: string): string {
   return url.startsWith(API_BASE) ? url.slice(API_BASE.length) : url
+}
+
+/** 图纸受鉴权保护，<a href> 带不上 Authorization 头，只能走 fetch + blob 下载 */
+async function saveDrawing(url: string, name: string): Promise<string | null> {
+  try {
+    await api.downloadDrawing(url, name)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : '图纸下载失败'
+  }
 }
 
 /**
@@ -167,20 +177,23 @@ export function SpecEditor({
           >
             {uploading ? '上传中…' : '+ 上传图纸（PDF/DWG/STEP）'}
           </button>
-          <span className="text-[10px] text-slate-500">生产端可直接下载，单文件 ≤ 64MB</span>
+          <span className="text-[10px] text-slate-500">仅已登录员工可下载，单文件 ≤ 64MB</span>
         </div>
         {drawings.length > 0 && (
           <ul className="mt-1.5 space-y-1">
             {drawings.map((d, i) => (
               <li key={i} className="flex items-center gap-2 text-[11px]">
-                <a
-                  href={resolveAssetUrl(d.url)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const err = await saveDrawing(d.url, d.name)
+                    if (err) setError(err)
+                  }}
                   className="text-brand-400 hover:underline"
+                  title="下载查看（图纸仅限已登录员工）"
                 >
                   {d.name}
-                </a>
+                </button>
                 <span className="text-slate-600">{d.url.split('/').pop()}</span>
                 <button
                   onClick={() => setDrawings((prev) => prev.filter((_, k) => k !== i))}

@@ -101,6 +101,17 @@ interface CatalogState extends MergedCatalog {
   removeEntry: (entryId: string) => Promise<void>
   /** 上传文件，返回后端相对路径（如 /uploads/xxx.glb） */
   upload: (file: File) => Promise<string>
+  /**
+   * 把内置商品的规格基线落一次库，返回新写入的条目数（仅销售端登录后调）。
+   *
+   * 为什么需要：下单时的生产规格快照由服务端组装，工艺/工时/主材/图纸
+   * 这些机密字段只认服务端基线（客户端传的一律丢弃）。而内置基线原本只存
+   * 在前端 bundle 里，库里没有，服务端就组不出完整快照。销售端登录后同步一次，
+   * 数据统一到 entries，销售也能在「商品库」里直接维护这些字段。
+   *
+   * 已存在 spec 的条目一律不碰，避免冲掉销售的手工维护。
+   */
+  ensureSpecBaselines: () => Promise<number>
 }
 
 const EMPTY: MergedCatalog = {
@@ -158,5 +169,35 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   upload: async (file) => {
     const res = await api.uploadFile(file)
     return res.url
+  },
+
+  ensureSpecBaselines: async () => {
+    const existing = new Map(get().entries.map((e) => [e.entryId, e]))
+    let written = 0
+    for (const p of BUILTIN_CATALOG) {
+      if (!p.spec) continue
+      const entryId = entryIds.productOverride(p.id)
+      const prev = existing.get(entryId)
+      const prevPayload = (prev?.payload ?? {}) as Record<string, unknown>
+      const prevSpec = (prevPayload.spec ?? {}) as Record<string, unknown>
+      // 服务端已有带标准尺寸的基线就不动；只补过 spec 的老基线（无 baseSize）需补写一次，
+      // 否则下单时 composeSpec 拿不到服务端标准尺寸，毫米换算会被迫回落客户端传值
+      if (typeof prevSpec.baseSizeW === 'number') continue
+      // 销售手工改过的字段保留（prevSpec 覆盖内置），标准尺寸一律以商品基线为准
+      await api.upsertEntry(entryId, 'product_override', {
+        ...prevPayload,
+        id: p.id,
+        spec: {
+          ...p.spec,
+          ...prevSpec,
+          baseSizeW: p.size.w,
+          baseSizeH: p.size.h,
+          baseSizeD: p.size.d,
+        },
+      })
+      written += 1
+    }
+    if (written > 0) await get().refresh()
+    return written
   },
 }))

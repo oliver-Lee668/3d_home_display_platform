@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api, type ApiOrder } from '../lib/api'
 import { statusColor, statusLabel } from '../lib/order'
+import { useAuth } from '../lib/auth'
 import { useCatalogStore } from '../store/useCatalogStore'
 import { CatalogManager } from './CatalogManager'
 import { FloorManager } from './FloorManager'
@@ -8,7 +9,6 @@ import { WorkOrderPanel, WorkOrderSheet } from './WorkOrder'
 import { Icon } from './icons'
 
 type Role = 'sales' | 'production'
-const OPERATOR_KEY = 'furniture-showroom:adminOperator'
 
 const ROLE_LABEL: Record<Role, string> = {
   sales: '销售部',
@@ -43,9 +43,10 @@ function rejectAction(role: Role, status: string): { action: string; label: stri
 
 /** 生产/销售确认台：角色由构建期 VITE_APP_ROLE 锁定，本端只能看到本部门界面 */
 export function AdminConsole({ role }: { role: Role }) {
-  const [operator, setOperator] = useState(
-    () => localStorage.getItem(OPERATOR_KEY) || (role === 'sales' ? '销售01' : '生产01'),
-  )
+  // 操作人不再手填：一律取自登录账号，流转历史因此可追溯且不可伪造
+  const me = useAuth((s) => s.user)
+  const signOut = useAuth((s) => s.signOut)
+  const [pwOpen, setPwOpen] = useState(false)
   const [orders, setOrders] = useState<ApiOrder[]>([])
   const [dbOk, setDbOk] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -75,16 +76,20 @@ export function AdminConsole({ role }: { role: Role }) {
     return () => window.clearInterval(t)
   }, [load])
 
-  // 销售端需要目录数据（商品库/地板维护）
+  // 销售端需要目录数据（商品库/地板维护）；登录后顺带把内置规格基线落库，
+  // 服务端组装下单快照时才有工艺/工时/图纸可用（仅写入缺失的，不覆盖手工维护）
   useEffect(() => {
-    if (role === 'sales') void useCatalogStore.getState().refresh()
+    if (role !== 'sales') return
+    const st = useCatalogStore.getState()
+    void st
+      .refresh()
+      .then(() => st.ensureSpecBaselines())
+      .catch(() => {
+        /* 后端不可用时保持内置基线，下次进入再试 */
+      })
   }, [role])
 
   const act = async (o: ApiOrder, action: string, label: string, needReason = false) => {
-    if (!operator.trim()) {
-      window.alert('请先填写操作人姓名')
-      return
-    }
     let note = label
     if (needReason) {
       const reason = window.prompt('请填写退回原因（会记入流转历史并同步给销售）：')
@@ -93,7 +98,7 @@ export function AdminConsole({ role }: { role: Role }) {
     }
     setBusyId(o.id)
     try {
-      await api.updateStatus(o.id, action, `${ROLE_LABEL[role]}:${operator.trim()}`, note)
+      await api.updateStatus(o.id, action, note)
       await load()
     } catch (e) {
       window.alert(e instanceof Error ? e.message : '操作失败')
@@ -124,17 +129,22 @@ export function AdminConsole({ role }: { role: Role }) {
           {dbOk === null ? '服务未连接' : dbOk ? 'MySQL 已连接' : 'DB 异常'}
         </span>
         <div className="flex-1" />
-        <label className="flex items-center gap-1 text-[12px] text-slate-400">
-          操作人
-          <input
-            value={operator}
-            onChange={(e) => {
-              setOperator(e.target.value)
-              localStorage.setItem(OPERATOR_KEY, e.target.value)
-            }}
-            className="w-24 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-[12px] text-slate-100 outline-none focus:border-brand-500"
-          />
-        </label>
+        <span className="text-[12px] text-slate-400">
+          {me?.displayName}
+          <span className="text-slate-600"> · {me?.username}</span>
+        </span>
+        <button
+          onClick={() => setPwOpen(true)}
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
+        >
+          修改密码
+        </button>
+        <button
+          onClick={signOut}
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
+        >
+          退出登录
+        </button>
         <button
           onClick={() => void load()}
           className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
@@ -142,6 +152,8 @@ export function AdminConsole({ role }: { role: Role }) {
           刷新
         </button>
       </header>
+
+      {pwOpen && <PasswordDialog onClose={() => setPwOpen(false)} />}
 
       {role === 'sales' && (
         <nav className="mb-3 flex gap-1">
@@ -313,5 +325,95 @@ function TabBtn({
     >
       {children}
     </button>
+  )
+}
+
+/** 修改自己的登录密码 */
+function PasswordDialog({ onClose }: { onClose: () => void }) {
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (newPassword.length < 8) {
+      setError('新密码至少 8 位，且同时包含字母与数字')
+      return
+    }
+    if (newPassword !== confirm) {
+      setError('两次输入的新密码不一致')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await api.changePassword(oldPassword, newPassword)
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '修改失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cls =
+    'w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[13px] text-slate-100 outline-none focus:border-brand-500'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+      <div className="panel w-full max-w-sm rounded-2xl p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <span className="text-[14px] font-semibold text-slate-100">修改密码</span>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white/10" title="关闭">
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <form onSubmit={(e) => void submit(e)} className="space-y-3">
+          <label className="block text-[12px] text-slate-400">
+            当前密码
+            <input
+              type="password"
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+              autoComplete="current-password"
+              className={cls + ' mt-1'}
+            />
+          </label>
+          <label className="block text-[12px] text-slate-400">
+            新密码
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              className={cls + ' mt-1'}
+              placeholder="至少 8 位，含字母与数字"
+            />
+          </label>
+          <label className="block text-[12px] text-slate-400">
+            确认新密码
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              className={cls + ' mt-1'}
+            />
+          </label>
+          {error && (
+            <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{error}</p>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full rounded-lg bg-brand-600 px-3 py-2 text-[13px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+          >
+            {busy ? '提交中…' : '确认修改'}
+          </button>
+        </form>
+      </div>
+    </div>
   )
 }

@@ -7,7 +7,13 @@
  * 可直接打印进工单，也不需要让员工端产物引入 three.js。
  */
 
-/** 生成三视图所需输入（尺寸均为定制后的实际毫米值） */
+/**
+ * 生成三视图所需输入（尺寸均为定制后的实际毫米值）。
+ *
+ * 这里只能放客户端拿得到的字段——三视图在下单瞬间由展示端生成，
+ * 而工艺/包装/工时属机密，展示端根本看不到（目录公开视图已脱敏）。
+ * 那三项由生产工单面板从服务端组装的规格快照里单独渲染，不依赖本图。
+ */
 export interface ThreeViewInput {
   name: string
   sku?: string
@@ -16,13 +22,10 @@ export interface ThreeViewInput {
   qty?: number
   scale?: number
   sizeMm: { w: number; h: number; d: number }
-  craft?: string
-  packing?: string
-  laborMinutes?: number
 }
 
 const CANVAS_W = 900
-const CANVAS_H = 400
+const CANVAS_H = 360
 const PANEL_W = 280
 const PANEL_TOP = 44
 const AREA_W = 170
@@ -170,7 +173,7 @@ function drawTitleBlock(ctx: CanvasRenderingContext2D, input: ThreeViewInput) {
   const top = 268
   ctx.strokeStyle = '#cbd5e1'
   ctx.lineWidth = 1
-  ctx.strokeRect(19.5, top + 0.5, CANVAS_W - 40, 118)
+  ctx.strokeRect(19.5, top + 0.5, CANVAS_W - 40, 78)
 
   const { w, h, d } = input.sizeMm
   const rows: [string, string][] = [
@@ -182,14 +185,6 @@ function drawTitleBlock(ctx: CanvasRenderingContext2D, input: ThreeViewInput) {
       input.scale && input.scale !== 1
         ? `×${input.scale.toFixed(2)}（非标定制，按换算尺寸加工）`
         : '标准尺寸',
-    ],
-    ['工艺要求', input.craft || '—'],
-    ['包装', input.packing || '—'],
-    [
-      '工时',
-      input.laborMinutes
-        ? `单件 ${input.laborMinutes} 分钟 / 合计 ${input.laborMinutes * (input.qty ?? 1)} 分钟`
-        : '—',
     ],
   ]
 

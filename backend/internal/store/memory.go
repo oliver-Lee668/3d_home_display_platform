@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,13 +14,19 @@ import (
 type memoryStore struct {
 	mu      sync.RWMutex
 	seq     int64
+	userSeq int64
 	orders  map[int64]*model.Order
 	entries map[string]*model.CatalogEntry
+	users   map[string]*model.User
 }
 
 // NewMemory 创建内存存储
 func NewMemory() Store {
-	return &memoryStore{orders: map[int64]*model.Order{}, entries: map[string]*model.CatalogEntry{}}
+	return &memoryStore{
+		orders:  map[int64]*model.Order{},
+		entries: map[string]*model.CatalogEntry{},
+		users:   map[string]*model.User{},
+	}
 }
 
 func (m *memoryStore) Ping() error { return nil }
@@ -52,6 +59,25 @@ func (m *memoryStore) List(status, phone string) ([]*model.Order, error) {
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *memoryStore) Lookup(orderNo, phone string) ([]*model.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	phone = strings.TrimSpace(phone)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []*model.Order{}
+	if orderNo == "" || phone == "" {
+		return out, nil
+	}
+	for _, o := range m.orders {
+		if o.OrderNo != orderNo || o.Customer.Phone != phone {
+			continue
+		}
+		cp := *o
+		out = append(out, &cp)
+	}
 	return out, nil
 }
 
@@ -109,4 +135,66 @@ func (m *memoryStore) DeleteEntry(entryID string) error {
 	defer m.mu.Unlock()
 	delete(m.entries, entryID)
 	return nil
+}
+
+// ---------------- 员工账号 ----------------
+
+func (m *memoryStore) GetUser(username string) (*model.User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	u, ok := m.users[strings.TrimSpace(username)]
+	if !ok {
+		return nil, nil
+	}
+	cp := *u
+	return &cp, nil
+}
+
+func (m *memoryStore) GetUserByID(id int64) (*model.User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, u := range m.users {
+		if u.ID == id {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *memoryStore) CreateUser(u *model.User) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[u.Username]; ok {
+		return errors.New("用户名已存在")
+	}
+	m.userSeq++
+	u.ID = m.userSeq
+	now := time.Now()
+	u.CreatedAt = now
+	u.UpdatedAt = now
+	cp := *u
+	m.users[u.Username] = &cp
+	return nil
+}
+
+// UpdateUserPassword 改密；同时清除"必须修改初始密码"标记
+func (m *memoryStore) UpdateUserPassword(id int64, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if u.ID == id {
+			u.PasswordHash = hash
+			u.MustChange = false
+			u.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+	return errors.New("账号不存在")
+}
+
+func (m *memoryStore) CountUsers() (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.users), nil
 }
