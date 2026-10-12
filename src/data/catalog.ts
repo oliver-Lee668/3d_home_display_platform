@@ -48,6 +48,15 @@ export const BUILTIN_CATALOG: Product[] = [
     ],
     price: 3299,
     description: '三人位布艺沙发，实木框架，高密度海绵坐垫。',
+    spec: {
+      sku: 'SF-3P-210',
+      materialSku: 'FL-9000 布艺面料',
+      craft: '实木框架拼装 → 海绵裁剪 → 面料车缝 → 绷架包覆 → 五金装脚 → 质检',
+      packing: '纸箱+珍珠棉，1 件/套，含脚垫五金包',
+      laborMinutes: 240,
+      scaleMin: 0.9,
+      scaleMax: 1.15,
+    },
   },
   {
     id: 'armchair',
@@ -62,6 +71,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'rust', label: '砖红', color: '#a4553d', roughness: 0.9 },
     ],
     price: 899,
+    spec: {
+      sku: 'AC-OL-082',
+      materialSku: 'FL-7200 布艺面料',
+      craft: '框架拼装 → 海绵贴合 → 面料车缝 → 包覆 → 五金装脚',
+      packing: '单件纸箱+护角，含脚垫',
+      laborMinutes: 90,
+      scaleMin: 0.9,
+      scaleMax: 1.2,
+    },
   },
   {
     id: 'bed-queen',
@@ -77,6 +95,16 @@ export const BUILTIN_CATALOG: Product[] = [
     ],
     price: 2599,
     description: '含床垫与床头板，适配 1.8×2.0m 床品。',
+    spec: {
+      sku: 'BD-Q180',
+      materialSku: 'BK-1800 实木板材',
+      craft: '床架开料 → 拼装 → 床头板包覆 → 五金预装 → 打包前试装',
+      packing: '拆装 3 件/套，含安装五金包与说明书',
+      laborMinutes: 180,
+      // 床体尺寸受标准床品限制，仅允许微调
+      scaleMin: 0.95,
+      scaleMax: 1.1,
+    },
   },
   {
     id: 'coffee-table',
@@ -91,6 +119,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'white', label: '纯白', color: '#f0f0ee', roughness: 0.55 },
     ],
     price: 699,
+    spec: {
+      sku: 'CT-110',
+      materialSku: 'BK-1100 实木板材',
+      craft: '台面开料 → 封边 → 打磨 → 面漆两底两面 → 五金装配',
+      packing: '纸箱+护角，1 件，含安装五金包',
+      laborMinutes: 60,
+      scaleMin: 0.85,
+      scaleMax: 1.25,
+    },
   },
   {
     id: 'dining-table',
@@ -104,6 +141,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'oak', label: '浅橡木', color: '#c8a878', roughness: 0.6 },
     ],
     price: 1599,
+    spec: {
+      sku: 'DT-150',
+      materialSku: 'BK-1500 实木拼板',
+      craft: '拼板 → 开料 → 榫卯/五金连接 → 打磨 → 面漆 → 桌腿装配',
+      packing: '拆装 2 件/套（台面+腿包），含五金包',
+      laborMinutes: 150,
+      scaleMin: 0.9,
+      scaleMax: 1.3,
+    },
   },
   {
     id: 'tv-stand',
@@ -117,6 +163,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'graphite', label: '石墨灰', color: '#4a4d52', roughness: 0.5 },
     ],
     price: 1099,
+    spec: {
+      sku: 'TS-170',
+      materialSku: 'PB-18mm 颗粒板',
+      craft: '板材开料 → 封边 → 排孔 → 柜体组装 → 门板装配（铰链/拉手）',
+      packing: '平板包装 2 件/套，含五金包与安装图',
+      laborMinutes: 120,
+      scaleMin: 0.9,
+      scaleMax: 1.3,
+    },
   },
   {
     id: 'wardrobe',
@@ -130,6 +185,16 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'wood', label: '原木', color: '#c19a6b', roughness: 0.6 },
     ],
     price: 1899,
+    spec: {
+      sku: 'WD-2D-120',
+      materialSku: 'PB-18mm 颗粒板 + 铝框门',
+      craft: '柜体开料 → 封边 → 排孔 → 门板包覆 → 铰链/滑轨装配 → 试装校尺',
+      packing: '平板包装 4 件/套，需上门复尺确认',
+      laborMinutes: 300,
+      // 受板材定长与五金规格限制
+      scaleMin: 0.95,
+      scaleMax: 1.15,
+    },
   },
   {
     id: 'fridge',
@@ -145,6 +210,16 @@ export const BUILTIN_CATALOG: Product[] = [
     ],
     price: 4299,
     description: '风冷无霜，一级能效，520L 大容量。',
+    spec: {
+      sku: 'RF-520L',
+      materialSku: 'PCM 彩涂钢板',
+      craft: '箱体发泡 → 内胆装配 → 制冷系统 → 门体装配 → 性能测试',
+      packing: '原厂纸箱+木托，1 件，禁倒置',
+      laborMinutes: 210,
+      // 家电为标准品，不接受尺寸定制
+      scaleMin: 1,
+      scaleMax: 1,
+    },
   },
   {
     id: 'tv-55',
@@ -157,6 +232,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'black', label: '曜石黑', color: '#141518', roughness: 0.3, metalness: 0.6 },
     ],
     price: 2799,
+    spec: {
+      sku: 'TV-55',
+      materialSku: 'LCD 面板 55"',
+      craft: '背光模组 → 面板贴合 → 主板装配 → 老化测试',
+      packing: '原厂纸箱+泡沫，1 件，屏面朝上堆放',
+      laborMinutes: 120,
+      scaleMin: 1,
+      scaleMax: 1,
+    },
   },
   {
     id: 'washer',
@@ -170,6 +254,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'silver', label: '钛金银', color: '#c9ced2', roughness: 0.3, metalness: 0.8 },
     ],
     price: 2199,
+    spec: {
+      sku: 'WM-10KG',
+      materialSku: '冷轧钢板箱体',
+      craft: '箱体冲压 → 内筒装配 → 电控与进排水装配 → 性能测试',
+      packing: '原厂纸箱，1 件，需直立运输',
+      laborMinutes: 180,
+      scaleMin: 1,
+      scaleMax: 1,
+    },
   },
   {
     id: 'plant',
@@ -182,6 +275,14 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'green', label: '翠绿', color: '#3f7d3a', roughness: 0.85 },
     ],
     price: 129,
+    spec: {
+      sku: 'DC-PL-130',
+      craft: '花盆烧制 → 基质填充 → 植株定植 → 装饰石铺设',
+      packing: '纸箱+防震填充，1 件',
+      laborMinutes: 20,
+      scaleMin: 0.8,
+      scaleMax: 1.4,
+    },
   },
   {
     id: 'floor-lamp',
@@ -195,6 +296,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'cool', label: '冷光', color: '#e6f0f5', roughness: 0.6 },
     ],
     price: 359,
+    spec: {
+      sku: 'DC-LP-155',
+      materialSku: '金属件+布艺灯罩',
+      craft: '金属件冲压 → 表面处理 → 电气装配 → 灯罩车缝 → 耐压测试',
+      packing: '拆装纸箱，含灯泡与说明书',
+      laborMinutes: 45,
+      scaleMin: 0.9,
+      scaleMax: 1.2,
+    },
   },
   {
     id: 'rug',
@@ -209,6 +319,15 @@ export const BUILTIN_CATALOG: Product[] = [
       { id: 'terracotta', label: '陶土', color: '#b5715a', roughness: 0.95 },
     ],
     price: 459,
+    spec: {
+      sku: 'DC-RG-200',
+      materialSku: 'PP 绒面+防滑背胶',
+      craft: '面料裁剪 → 车边 → 背胶复合 → 卷装',
+      packing: '卷装+防潮膜，1 件',
+      laborMinutes: 30,
+      scaleMin: 0.8,
+      scaleMax: 1.5,
+    },
   },
 ]
 

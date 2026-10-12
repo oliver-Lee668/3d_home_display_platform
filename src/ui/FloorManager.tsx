@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { BUILTIN_FLOORS } from '../data/floors'
 import { entryIds, useCatalogStore } from '../store/useCatalogStore'
+import { useFlash } from './useFlash'
 
 /** 地板管理（销售端）：上传新地板 / 下架内置地板 / 删除已上传地板 */
 export function FloorManager() {
@@ -15,7 +16,7 @@ export function FloorManager() {
 
   const [label, setLabel] = useState('')
   const [file, setFile] = useState<File | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
+  const { msg, setMsg, flash } = useFlash()
   const [working, setWorking] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -30,9 +31,9 @@ export function FloorManager() {
     setMsg(null)
     try {
       await fn()
-      setMsg(`${text}成功`)
+      flash(`${text}成功`)
     } catch (e) {
-      setMsg(`${text}失败：${e instanceof Error ? e.message : String(e)}`)
+      flash(`${text}失败：${e instanceof Error ? e.message : String(e)}`, 8000)
     } finally {
       setWorking(false)
     }
@@ -45,8 +46,8 @@ export function FloorManager() {
 
   const submit = () => {
     const name = label.trim()
-    if (!name) return setMsg('请填写地板名称')
-    if (!file) return setMsg('请选择地板贴图（png/jpg/webp）')
+    if (!name) return flash('请填写地板名称', 6000)
+    if (!file) return flash('请选择地板贴图（png/jpg/webp）', 6000)
     void run('上传地板', async () => {
       const url = await upload(file)
       const id = `floor_${Date.now().toString(36)}`

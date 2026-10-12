@@ -4,6 +4,7 @@ import { statusColor, statusLabel } from '../lib/order'
 import { useCatalogStore } from '../store/useCatalogStore'
 import { CatalogManager } from './CatalogManager'
 import { FloorManager } from './FloorManager'
+import { WorkOrderPanel, WorkOrderSheet } from './WorkOrder'
 import { Icon } from './icons'
 
 type Role = 'sales' | 'production'
@@ -21,12 +22,22 @@ function fmtTime(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** 该角色在当前状态下可执行的动作 */
+/** 该角色在当前状态下可执行的主推动作 */
 function actionFor(role: Role, status: string): { action: string; label: string } | null {
   if (role === 'sales' && status === 'submitted') return { action: 'sales_confirm', label: '销售确认' }
+  if (role === 'sales' && status === 'rejected')
+    return { action: 'resubmit', label: '重新提交生产' }
   if (role === 'production' && status === 'sales_confirmed')
     return { action: 'production_confirm', label: '生产确认 · 进入生产' }
   if (role === 'production' && status === 'in_production') return { action: 'complete', label: '完成生产' }
+  return null
+}
+
+/** 退回动作：生产端发现规格/工艺不可行时退回销售，必须附原因 */
+function rejectAction(role: Role, status: string): { action: string; label: string } | null {
+  if (role !== 'production') return null
+  if (status === 'sales_confirmed' || status === 'in_production')
+    return { action: 'reject', label: '退回销售' }
   return null
 }
 
@@ -41,6 +52,10 @@ export function AdminConsole({ role }: { role: Role }) {
   const [busyId, setBusyId] = useState<number | null>(null)
   // 销售端额外拥有商品库/地板维护页签；生产端仅订单
   const [tab, setTab] = useState<'orders' | 'catalog' | 'floor'>('orders')
+  // 已展开生产工单的订单 id
+  const [woOpen, setWoOpen] = useState<number[]>([])
+  // 待打印的工单（纸样预览 + 浏览器打印）
+  const [printOrder, setPrintOrder] = useState<ApiOrder | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -65,14 +80,20 @@ export function AdminConsole({ role }: { role: Role }) {
     if (role === 'sales') void useCatalogStore.getState().refresh()
   }, [role])
 
-  const act = async (o: ApiOrder, action: string, label: string) => {
+  const act = async (o: ApiOrder, action: string, label: string, needReason = false) => {
     if (!operator.trim()) {
       window.alert('请先填写操作人姓名')
       return
     }
+    let note = label
+    if (needReason) {
+      const reason = window.prompt('请填写退回原因（会记入流转历史并同步给销售）：')
+      if (!reason || !reason.trim()) return
+      note = `退回原因：${reason.trim()}`
+    }
     setBusyId(o.id)
     try {
-      await api.updateStatus(o.id, action, `${ROLE_LABEL[role]}:${operator.trim()}`, label)
+      await api.updateStatus(o.id, action, `${ROLE_LABEL[role]}:${operator.trim()}`, note)
       await load()
     } catch (e) {
       window.alert(e instanceof Error ? e.message : '操作失败')
@@ -80,6 +101,12 @@ export function AdminConsole({ role }: { role: Role }) {
       setBusyId(null)
     }
   }
+
+  const toggleWo = (id: number) =>
+    setWoOpen((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+
+  // 打印时取最新订单数据（轮询可能已刷新）
+  const sheetOrder = printOrder ? (orders.find((o) => o.id === printOrder.id) ?? printOrder) : null
 
   return (
     <div className="h-full w-full overflow-y-auto bg-slate-900 p-4">
@@ -150,6 +177,7 @@ export function AdminConsole({ role }: { role: Role }) {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {orders.map((o) => {
               const actBtn = actionFor(role, o.status)
+              const rejBtn = rejectAction(role, o.status)
               return (
                 <div key={o.id} className="panel rounded-2xl p-4">
                   <div className="flex items-start justify-between gap-2">
@@ -182,14 +210,23 @@ export function AdminConsole({ role }: { role: Role }) {
                       </div>
                       <div className="mt-1 space-y-0.5">
                         {o.items.map((it, i) => (
-                          <div key={i} className="flex justify-between">
-                            <span className="truncate">
-                              {it.name}（{it.materialLabel}
-                              {it.scale !== 1 ? `, 缩放${it.scale.toFixed(2)}` : ''}）
-                            </span>
-                            <span>
-                              ×{it.qty} ¥{(it.unitPrice * it.qty).toFixed(0)}
-                            </span>
+                          <div key={i}>
+                            <div className="flex justify-between">
+                              <span className="truncate">
+                                {it.name}（{it.materialLabel}
+                                {it.scale !== 1 ? `, 缩放${it.scale.toFixed(2)}` : ''}）
+                              </span>
+                              <span>
+                                ×{it.qty} ¥{(it.unitPrice * it.qty).toFixed(0)}
+                              </span>
+                            </div>
+                            {it.spec && (
+                              <div className="text-[10px] text-slate-500">
+                                型号 {it.spec.sku || '未编码'} · {it.spec.sizeWmm}×{it.spec.sizeDmm}×
+                                {it.spec.sizeHmm} mm · {it.spec.group}车间
+                                {it.spec.laborMinutes ? ` · ${it.spec.laborMinutes} 分/件` : ''}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -208,26 +245,50 @@ export function AdminConsole({ role }: { role: Role }) {
                         <span className="text-slate-300">{statusLabel(h.status)}</span>
                         <span>· {h.by}</span>
                         <span>· {fmtTime(h.at)}</span>
+                        {h.note && <span className="text-slate-500">· {h.note}</span>}
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] text-slate-600">下单于 {fmtTime(o.createdAt)}</span>
-                    {actBtn && (
+                    <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => void act(o, actBtn.action, actBtn.label)}
-                        disabled={busyId === o.id}
-                        className="rounded-lg bg-brand-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+                        onClick={() => toggleWo(o.id)}
+                        className="rounded-lg border border-white/15 px-2.5 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
                       >
-                        {busyId === o.id ? '处理中…' : actBtn.label}
+                        {woOpen.includes(o.id) ? '收起工单' : '生产工单'}
                       </button>
-                    )}
+                      {rejBtn && (
+                        <button
+                          onClick={() => void act(o, rejBtn.action, rejBtn.label, true)}
+                          disabled={busyId === o.id}
+                          className="rounded-lg border border-rose-500/40 px-2.5 py-1.5 text-[12px] text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                        >
+                          {rejBtn.label}
+                        </button>
+                      )}
+                      {actBtn && (
+                        <button
+                          onClick={() => void act(o, actBtn.action, actBtn.label)}
+                          disabled={busyId === o.id}
+                          className="rounded-lg bg-brand-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+                        >
+                          {busyId === o.id ? '处理中…' : actBtn.label}
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {woOpen.includes(o.id) && (
+                    <WorkOrderPanel order={o} onPrint={() => setPrintOrder(o)} />
+                  )}
                 </div>
               )
             })}
           </div>
+
+          {sheetOrder && <WorkOrderSheet order={sheetOrder} onClose={() => setPrintOrder(null)} />}
         </>
       )}
     </div>

@@ -11,9 +11,9 @@ import (
 
 // memoryStore 内存实现，仅用于无 MySQL 环境下的演示与验收（重启即失）
 type memoryStore struct {
-	mu     sync.RWMutex
-	seq    int64
-	orders map[int64]*model.Order
+	mu      sync.RWMutex
+	seq     int64
+	orders  map[int64]*model.Order
 	entries map[string]*model.CatalogEntry
 }
 

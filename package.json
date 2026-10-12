@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Web 3D 家具家电仿真展示平台 (MVP)",
   "scripts": {
-    "dev": "vite",
-    "dev:sales": "vite --mode sales",
-    "dev:factory": "vite --mode factory",
+    "dev": "vite --port 5173 --strictPort",
+    "dev:sales": "vite --mode sales --port 5184 --strictPort",
+    "dev:factory": "vite --mode factory --port 5175 --strictPort",
     "build": "tsc && vite build",
     "build:user": "tsc && vite build --mode user",
     "build:sales": "tsc && vite build --mode sales",

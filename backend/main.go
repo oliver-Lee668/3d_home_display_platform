@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,6 +130,36 @@ func handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "订单至少包含一件商品")
 		return
 	}
+
+	// 依据目录主数据校验定制尺寸可行域，并以服务端重算冻结规格（防前端篡改）
+	limits, lerr := specLimits()
+	if lerr != nil {
+		log.Println("[warn] 读取规格可行域失败，跳过校验：", lerr)
+	}
+	for i := range req.Items {
+		it := &req.Items[i]
+		if it.Scale <= 0 {
+			it.Scale = 1
+		}
+		lm := limits[it.ProductID]
+		if lm.min > 0 && it.Scale < lm.min-1e-9 {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+				"「%s」定制缩放 %.2f 低于工艺下限 %.2f，请调整后重新下单", it.Name, it.Scale, lm.min))
+			return
+		}
+		if lm.max > 0 && it.Scale > lm.max+1e-9 {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+				"「%s」定制缩放 %.2f 超出工艺上限 %.2f，请调整后重新下单", it.Name, it.Scale, lm.max))
+			return
+		}
+		if it.Spec != nil {
+			it.Spec.SizeWMM = toMM(it.Spec.BaseSizeW * it.Scale)
+			it.Spec.SizeHMM = toMM(it.Spec.BaseSizeH * it.Scale)
+			it.Spec.SizeDMM = toMM(it.Spec.BaseSizeD * it.Scale)
+			it.Spec.ScaleMin = lm.min
+			it.Spec.ScaleMax = lm.max
+		}
+	}
 	o := &model.Order{
 		OrderNo:     genOrderNo(),
 		Status:      model.StatusSubmitted,
@@ -153,6 +184,40 @@ func handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 func genOrderNo() string {
 	n := orderSeq.Add(1) % 10000
 	return "SO" + time.Now().Format("20060102") + "-" + fmt.Sprintf("%04d", n)
+}
+
+// toMM 米转毫米（四舍五入）
+func toMM(meters float64) int { return int(math.Round(meters * 1000)) }
+
+type scaleLimit struct{ min, max float64 }
+
+// specLimits 从目录条目中汇总每个商品的定制缩放可行域（销售端维护的规格主数据）
+func specLimits() (map[string]scaleLimit, error) {
+	out := map[string]scaleLimit{}
+	list, err := st.ListEntries()
+	if err != nil {
+		return out, err
+	}
+	for _, e := range list {
+		if e.Type != model.EntryProductOverride && e.Type != model.EntryProductCustom {
+			continue
+		}
+		if len(e.Payload) == 0 {
+			continue
+		}
+		var p struct {
+			ID   string `json:"id"`
+			Spec *struct {
+				ScaleMin float64 `json:"scaleMin"`
+				ScaleMax float64 `json:"scaleMax"`
+			} `json:"spec"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil || p.ID == "" || p.Spec == nil {
+			continue
+		}
+		out[p.ID] = scaleLimit{min: p.Spec.ScaleMin, max: p.Spec.ScaleMax}
+	}
+	return out, nil
 }
 
 func handleListOrders(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +260,10 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req statusReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	if model.NeedsNote(req.Action) && strings.TrimSpace(req.Note) == "" {
+		writeErr(w, http.StatusBadRequest, "退回必须填写原因")
 		return
 	}
 	o, err := st.Get(id)
@@ -285,7 +354,11 @@ func handleDeleteEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 var allowedUploadExt = map[string]bool{
+	// 模型与贴图
 	".glb": true, ".gltf": true, ".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
+	// 图纸/工艺文件
+	".pdf": true, ".dwg": true, ".dxf": true, ".step": true, ".stp": true,
+	".iges": true, ".igs": true, ".zip": true,
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +375,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !allowedUploadExt[ext] {
-		writeErr(w, http.StatusBadRequest, "不支持的文件类型 "+ext+"（允许 glb/gltf/png/jpg/jpeg/webp）")
+		writeErr(w, http.StatusBadRequest, "不支持的文件类型 "+ext+"（允许 glb/gltf/png/jpg/jpeg/webp/pdf/dwg/dxf/step/stp/iges/igs/zip）")
 		return
 	}
 	name := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), orderSeq.Add(1), ext)

@@ -24,6 +24,37 @@ export interface ApiCatalogEntry {
   updatedAt: string
 }
 
+/** 图纸附件 */
+export interface ApiDrawing {
+  name: string
+  url: string
+}
+
+/** 订单行的生产规格快照（与后端 model.ItemSpec 对齐） */
+export interface ApiItemSpec {
+  sku?: string
+  category?: string
+  group?: string
+  /** 标准外形尺寸（米） */
+  baseSizeW: number
+  baseSizeH: number
+  baseSizeD: number
+  /** 定制后实际尺寸（毫米，服务端重算） */
+  sizeWmm: number
+  sizeHmm: number
+  sizeDmm: number
+  materialSku?: string
+  colorCode?: string
+  craft?: string
+  packing?: string
+  laborMinutes?: number
+  scaleMin?: number
+  scaleMax?: number
+  drawings?: ApiDrawing[]
+  /** 带尺寸标注的三视图合成图 dataURL */
+  views?: string
+}
+
 export interface ApiOrderItem {
   productId: string
   name: string
@@ -32,6 +63,7 @@ export interface ApiOrderItem {
   materialLabel: string
   scale: number
   unitPrice: number
+  spec?: ApiItemSpec
 }
 
 export interface ApiCustomer {

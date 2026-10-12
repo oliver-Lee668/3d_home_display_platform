@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
-import type { Category, Product } from '../types'
+import type { Category, Product, ProductSpec } from '../types'
 import { BUILTIN_CATALOG, CATEGORY_META, CATEGORY_ORDER } from '../data/catalog'
 import { entryIds, useCatalogStore } from '../store/useCatalogStore'
 import type { ApiCatalogEntry } from '../lib/api'
+import { SpecEditor } from './SpecEditor'
+import { useFlash } from './useFlash'
 
 /** 新增商品表单初值 */
 const EMPTY_FORM = {
@@ -16,7 +18,7 @@ const EMPTY_FORM = {
 
 const MODEL_EXT = '.glb,.gltf'
 
-/** 商品库管理（销售端）：上传替换模型 / 改价 / 新增 / 下架 */
+/** 商品库管理（销售端）：上传替换模型 / 改价 / 规格主数据 / 新增 / 下架 */
 export function CatalogManager() {
   const products = useCatalogStore((s) => s.products)
   const entries = useCatalogStore((s) => s.entries)
@@ -33,7 +35,8 @@ export function CatalogManager() {
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [priceId, setPriceId] = useState<string | null>(null)
   const [priceVal, setPriceVal] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
+  const [specId, setSpecId] = useState<string | null>(null)
+  const { msg, setMsg, flash } = useFlash()
   const [working, setWorking] = useState(false)
   const replaceRef = useRef<HTMLInputElement>(null)
   const addFileRef = useRef<HTMLInputElement>(null)
@@ -57,9 +60,9 @@ export function CatalogManager() {
     setMsg(null)
     try {
       await fn()
-      setMsg(`${label}成功`)
+      flash(`${label}成功`)
     } catch (e) {
-      setMsg(`${label}失败：${e instanceof Error ? e.message : String(e)}`)
+      flash(`${label}失败：${e instanceof Error ? e.message : String(e)}`, 8000)
     } finally {
       setWorking(false)
     }
@@ -89,12 +92,37 @@ export function CatalogManager() {
   const savePrice = (id: string) => {
     const price = Number(priceVal)
     if (!Number.isFinite(price) || price < 0) {
-      setMsg('价格需为非负数字')
+      flash('价格需为非负数字', 6000)
       return
     }
     setPriceId(null)
     void run('改价', () =>
       saveEntry(entryIds.productOverride(id), 'product_override', { ...patchOf(id), id, price }),
+    )
+  }
+
+  /** 上传商品的整体负载（保存规格时需保留其余字段） */
+  const customOf = (id: string): Product | undefined => {
+    const e = entries.find((x) => x.entryId === entryIds.productCustom(id))
+    return e?.payload ? (e.payload as Product) : undefined
+  }
+
+  /**
+   * 保存规格主数据：
+   * - 内置商品→写入 override 条目（与改模型/改价叠加）
+   * - 销售上传商品→直接更新 custom 条目整体负载
+   */
+  const saveSpec = async (p: Product, spec: ProductSpec): Promise<void> => {
+    setSpecId(null)
+    if (isCustom(p.id)) {
+      const base = customOf(p.id)
+      if (!base) return flash('保存规格失败：未找到上传商品数据', 6000)
+      return run('保存规格', () =>
+        saveEntry(entryIds.productCustom(p.id), 'product_custom', { ...base, spec }),
+      )
+    }
+    return run('保存规格', () =>
+      saveEntry(entryIds.productOverride(p.id), 'product_override', { ...patchOf(p.id), id: p.id, spec }),
     )
   }
 
@@ -106,14 +134,14 @@ export function CatalogManager() {
   const submitAdd = () => {
     const name = form.name.trim()
     const file = addFile.current
-    if (!name) return setMsg('请填写商品名称')
-    if (!file) return setMsg('请上传 glTF/GLB 模型文件')
+    if (!name) return flash('请填写商品名称', 6000)
+    if (!file) return flash('请上传 glTF/GLB 模型文件', 6000)
     const w = Number(form.w)
     const h = Number(form.h)
     const d = Number(form.d)
     const price = Number(form.price)
-    if (![w, h, d].every((n) => Number.isFinite(n) && n > 0)) return setMsg('尺寸需为大于 0 的数字')
-    if (!Number.isFinite(price) || price < 0) return setMsg('价格需为非负数字')
+    if (![w, h, d].every((n) => Number.isFinite(n) && n > 0)) return flash('尺寸需为大于 0 的数字', 6000)
+    if (!Number.isFinite(price) || price < 0) return flash('价格需为非负数字', 6000)
 
     void run('新增商品', async () => {
       const url = await upload(file)
@@ -268,6 +296,20 @@ export function CatalogManager() {
                 <span className="ml-auto text-[13px] text-amber-300">¥{p.price ?? 0}</span>
               </div>
 
+              {p.spec && (
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                  <span>型号 {p.spec.sku || '未编码'}</span>
+                  <span>工时 {p.spec.laborMinutes ? `${p.spec.laborMinutes} 分/件` : '未填'}</span>
+                  <span>
+                    定制范围{' '}
+                    {p.spec.scaleMin || p.spec.scaleMax
+                      ? `×${p.spec.scaleMin ?? '不限'} ~ ×${p.spec.scaleMax ?? '不限'}`
+                      : '未限定'}
+                  </span>
+                  <span>图纸 {p.spec.drawings?.length ?? 0} 份</span>
+                </div>
+              )}
+
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
                 {!isCustom(p.id) && (
                   <>
@@ -336,10 +378,28 @@ export function CatalogManager() {
                     删除商品
                   </Btn>
                 )}
+                <Btn
+                  disabled={working}
+                  onClick={() => {
+                    setMsg(null)
+                    setSpecId(specId === p.id ? null : p.id)
+                  }}
+                >
+                  {specId === p.id ? '收起规格' : '规格/图纸'}
+                </Btn>
                 {busy === entryIds.productOverride(p.id) && (
                   <span className="text-slate-500">处理中…</span>
                 )}
               </div>
+
+              {specId === p.id && (
+                <SpecEditor
+                  product={p}
+                  working={working}
+                  onSave={(spec) => saveSpec(p, spec)}
+                  onCancel={() => setSpecId(null)}
+                />
+              )}
             </div>
           )
         })}

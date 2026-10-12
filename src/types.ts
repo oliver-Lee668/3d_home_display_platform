@@ -34,6 +34,36 @@ export type ModelSource =
   | { kind: 'procedural'; ref: string } // ref 对应 ModelRegistry 中的程序化模型键
   | { kind: 'gltf'; ref: string } // ref 为 public 下的 glTF/GLB 路径
 
+/** 图纸/工艺附件（销售端上传，生产端下载） */
+export interface DrawingRef {
+  name: string
+  /** 后端相对路径（/uploads/xxx.pdf）或已解析的绝对地址 */
+  url: string
+}
+
+/**
+ * 商品规格主数据（销售端维护）。
+ * 下单时会连同尺寸换算结果一起快照到订单，作为生产加工依据。
+ */
+export interface ProductSpec {
+  /** 型号/物料编码 */
+  sku?: string
+  /** 面料/板材等主材 SKU */
+  materialSku?: string
+  /** 工艺路线与加工要求 */
+  craft?: string
+  /** 包装规格 */
+  packing?: string
+  /** 单件标准工时（分钟） */
+  laborMinutes?: number
+  /** 定制可行域：最小缩放系数 */
+  scaleMin?: number
+  /** 定制可行域：最大缩放系数 */
+  scaleMax?: number
+  /** 图纸附件列表 */
+  drawings?: DrawingRef[]
+}
+
 /** 商品（目录条目） */
 export interface Product {
   id: string
@@ -46,6 +76,8 @@ export interface Product {
   defaultMaterialId: string
   price?: number
   description?: string
+  /** 生产规格主数据（可选，销售端维护） */
+  spec?: ProductSpec
 }
 
 /** 场景中已放置的一个商品实例 */

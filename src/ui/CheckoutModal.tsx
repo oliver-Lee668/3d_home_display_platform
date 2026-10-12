@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { buildOrderLines, buildOrderPayload, linesTotal, setLastPhone, statusLabel } from '../lib/order'
+import {
+  buildOrderLines,
+  buildOrderPayload,
+  linesTotal,
+  scaleIssues,
+  setLastPhone,
+  sizeText,
+  statusLabel,
+} from '../lib/order'
 import { useSceneStore } from '../store/useSceneStore'
 import { Icon } from './icons'
 
@@ -9,6 +17,8 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
   const notify = useSceneStore((s) => s.notify)
   const lines = useMemo(() => buildOrderLines(), [])
   const total = useMemo(() => linesTotal(lines), [lines])
+  // 定制尺寸超出工艺可行域时阻止下单（后端仍会再校验一次）
+  const issues = useMemo(() => scaleIssues(lines), [lines])
 
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -24,6 +34,10 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
     }
     if (lines.length === 0) {
       setError('场景中没有可下单的商品，请先摆放家具')
+      return
+    }
+    if (issues.length > 0) {
+      setError('存在超出工艺可行域的定制尺寸，请先调整')
       return
     }
     setSubmitting(true)
@@ -124,18 +138,27 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
                 ) : (
                   <div className="divide-y divide-white/5 rounded-lg border border-white/10">
                     {lines.map((l, i) => (
-                      <div key={i} className="flex items-center justify-between px-3 py-2 text-[12px]">
-                        <span className="text-slate-200">
-                          {l.name}
-                          <span className="ml-2 text-slate-500">
-                            {l.materialLabel}
-                            {l.scale !== 1 ? ` · 缩放${l.scale.toFixed(2)}` : ''}
+                      <div key={i} className="px-3 py-2 text-[12px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-200">
+                            {l.name}
+                            <span className="ml-2 text-slate-500">
+                              {l.materialLabel}
+                              {l.scale !== 1 ? ` · 缩放${l.scale.toFixed(2)}` : ''}
+                            </span>
                           </span>
-                        </span>
-                        <span className="text-slate-300">
-                          ×{l.qty}
-                          <span className="ml-2 text-amber-300">¥{(l.unitPrice * l.qty).toFixed(0)}</span>
-                        </span>
+                          <span className="text-slate-300">
+                            ×{l.qty}
+                            <span className="ml-2 text-amber-300">¥{(l.unitPrice * l.qty).toFixed(0)}</span>
+                          </span>
+                        </div>
+                        {l.spec && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[10px] text-slate-500">
+                            <span>型号 {l.spec.sku || '未编码'}</span>
+                            <span>定制后 {sizeText(l)} mm</span>
+                            <span>标准 {Math.round(l.spec.baseSizeW * 1000)}×{Math.round(l.spec.baseSizeD * 1000)}×{Math.round(l.spec.baseSizeH * 1000)} mm</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -145,6 +168,19 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
                   <span className="font-semibold text-amber-300">¥{total.toFixed(2)}</span>
                 </div>
               </section>
+
+              {issues.length > 0 && (
+                <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
+                  <p className="font-medium">以下定制尺寸超出工艺可行域，请回场景中调整后再下单：</p>
+                  <ul className="mt-1 list-inside list-disc space-y-0.5 text-[11px]">
+                    {issues.map((x, i) => (
+                      <li key={i}>
+                        {x.name}：当前 ×{x.scale.toFixed(2)}，允许 ×{x.min ?? '不限'} ~ ×{x.max ?? '不限'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {error && (
                 <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{error}</p>
@@ -157,7 +193,7 @@ export function CheckoutModal({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 onClick={submit}
-                disabled={submitting}
+                disabled={submitting || issues.length > 0}
                 className="rounded-lg bg-brand-600 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-500 disabled:opacity-50"
               >
                 {submitting ? '提交中…' : '提交订单'}

@@ -76,3 +76,31 @@ input[type='range']::-moz-range-thumb {
   backdrop-filter: blur(10px);
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
+
+/* 打印：仅输出工单纸样区域（.print-area），隐藏界面其余部分 */
+@media print {
+  body {
+    background: #fff;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    box-shadow: none;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 12mm;
+  }
+}
