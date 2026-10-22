@@ -133,6 +133,23 @@ export function AdminConsole({ role }: { role: Role }) {
           {me?.displayName}
           <span className="text-slate-600"> · {me?.username}</span>
         </span>
+        {role === 'production' && (
+          <>
+            {/* 车间执行层入口：报工页可手机扫码使用，看板适合挂大屏 */}
+            <a
+              href="#/report"
+              className="rounded-lg bg-brand-600 px-3 py-1.5 text-[12px] text-white hover:bg-brand-500"
+            >
+              扫码报工
+            </a>
+            <a
+              href="#/board"
+              className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"
+            >
+              车间看板
+            </a>
+          </>
+        )}
         <button
           onClick={() => setPwOpen(true)}
           className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-slate-200 hover:bg-white/10"

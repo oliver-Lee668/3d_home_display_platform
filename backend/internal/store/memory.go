@@ -12,12 +12,14 @@ import (
 
 // memoryStore 内存实现，仅用于无 MySQL 环境下的演示与验收（重启即失）
 type memoryStore struct {
-	mu      sync.RWMutex
-	seq     int64
-	userSeq int64
-	orders  map[int64]*model.Order
-	entries map[string]*model.CatalogEntry
-	users   map[string]*model.User
+	mu        sync.RWMutex
+	seq       int64
+	userSeq   int64
+	reportSeq int64
+	orders    map[int64]*model.Order
+	entries   map[string]*model.CatalogEntry
+	users     map[string]*model.User
+	reports   map[int64]*model.WorkReport
 }
 
 // NewMemory 创建内存存储
@@ -26,6 +28,7 @@ func NewMemory() Store {
 		orders:  map[int64]*model.Order{},
 		entries: map[string]*model.CatalogEntry{},
 		users:   map[string]*model.User{},
+		reports: map[int64]*model.WorkReport{},
 	}
 }
 
@@ -197,4 +200,46 @@ func (m *memoryStore) CountUsers() (int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.users), nil
+}
+
+// ---------------- 车间报工 ----------------
+
+func (m *memoryStore) AddReport(r *model.WorkReport) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reportSeq++
+	r.ID = m.reportSeq
+	r.At = time.Now()
+	cp := *r
+	m.reports[r.ID] = &cp
+	return nil
+}
+
+func (m *memoryStore) ListReports(orderID int64) ([]*model.WorkReport, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*model.WorkReport, 0, 8)
+	for _, r := range m.reports {
+		if r.OrderID == orderID {
+			cp := *r
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	return out, nil
+}
+
+func (m *memoryStore) ListAllReports(limit int) ([]*model.WorkReport, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*model.WorkReport, 0, len(m.reports))
+	for _, r := range m.reports {
+		cp := *r
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }

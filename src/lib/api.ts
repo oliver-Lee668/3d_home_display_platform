@@ -144,6 +144,53 @@ export interface ApiCaptcha {
   expiresIn: number
 }
 
+/** 车间报工记录（执行层留痕） */
+export interface ApiWorkReport {
+  id: number
+  orderId: number
+  orderNo: string
+  itemIndex: number
+  itemName: string
+  workshop: string
+  action: 'start' | 'complete'
+  qtyGood: number
+  qtyScrap: number
+  /** 报工人，后端从 token 取 */
+  worker: string
+  note?: string
+  at: string
+}
+
+/** 某个工单行的报工进度 */
+export interface ApiReportProgress {
+  planned: number
+  good: number
+  scrap: number
+}
+
+export interface ApiWorkshopStat {
+  workshop: string
+  orders: number
+  pieces: number
+  good: number
+  scrap: number
+  progress: number
+  laborMinutes: number
+}
+
+/** 车间看板读数 */
+export interface ApiDashboard {
+  inProduction: number
+  inProductionPieces: number
+  rejected: number
+  todayReports: number
+  todayGood: number
+  todayScrap: number
+  todayLaborMinutes: number
+  workshops: ApiWorkshopStat[]
+  recent: ApiWorkReport[]
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const token = getToken()
@@ -221,6 +268,25 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, note }),
     }),
+
+  // ------- 车间执行层（报工 / 看板）-------
+  addReport: (payload: {
+    orderId: number
+    itemIndex: number
+    action: 'start' | 'complete'
+    qtyGood?: number
+    qtyScrap?: number
+    note?: string
+  }) =>
+    req<{ report: ApiWorkReport; progress: ApiReportProgress }>('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  listReports: (orderId: number) => req<ApiWorkReport[]>(`/api/reports?orderId=${orderId}`),
+
+  dashboard: () => req<ApiDashboard>('/api/dashboard'),
 
   // ------- 目录（商品/地板）-------
   listEntries: () => req<ApiCatalogEntry[]>('/api/entries'),

@@ -54,6 +54,25 @@ const createUsersTableSQL = `CREATE TABLE IF NOT EXISTS users (
   UNIQUE KEY uk_username (username)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
 
+// 车间报工流水：执行层留痕，看板与工单进度均由此汇总
+const createReportsTableSQL = `CREATE TABLE IF NOT EXISTS work_reports (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id      BIGINT UNSIGNED NOT NULL,
+  order_no      VARCHAR(32)     NOT NULL,
+  item_index    INT             NOT NULL,
+  item_name     VARCHAR(128)    NOT NULL DEFAULT '',
+  workshop      VARCHAR(64)     NOT NULL DEFAULT '',
+  action        VARCHAR(16)     NOT NULL,
+  qty_good      INT             NOT NULL DEFAULT 0,
+  qty_scrap     INT             NOT NULL DEFAULT 0,
+  worker        VARCHAR(64)     NOT NULL,
+  note          VARCHAR(255)    NOT NULL DEFAULT '',
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_report_order (order_id),
+  KEY idx_report_created (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci`
+
 // splitDSN 把 "user:pass@tcp(host:port)/dbname?params" 拆成 无库DSN 与 库名
 func splitDSN(dsn string) (base, dbname string, ok bool) {
 	i := strings.Index(dsn, ")/")
@@ -109,6 +128,10 @@ func ensureSchema(dsn string) error {
 		return err
 	}
 	_, err = db2.Exec(createUsersTableSQL)
+	if err != nil {
+		return err
+	}
+	_, err = db2.Exec(createReportsTableSQL)
 	return err
 }
 
@@ -384,4 +407,81 @@ func (s *mysqlStore) CountUsers() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
+}
+
+// ---------------- 车间报工 ----------------
+
+func (s *mysqlStore) AddReport(r *model.WorkReport) error {
+	r.At = time.Now()
+	res, err := s.db.Exec(
+		`INSERT INTO work_reports
+		 (order_id, order_no, item_index, item_name, workshop, action, qty_good, qty_scrap, worker, note, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		r.OrderID, r.OrderNo, r.ItemIndex, r.ItemName, r.Workshop,
+		r.Action, r.QtyGood, r.QtyScrap, r.Worker, r.Note, r.At,
+	)
+	if err != nil {
+		return err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	r.ID = id
+	return nil
+}
+
+const reportCols = `id, order_id, order_no, item_index, item_name, workshop, action, qty_good, qty_scrap, worker, note, created_at`
+
+func scanReport(sc interface{ Scan(...any) error }) (*model.WorkReport, error) {
+	r := &model.WorkReport{}
+	err := sc.Scan(&r.ID, &r.OrderID, &r.OrderNo, &r.ItemIndex, &r.ItemName, &r.Workshop,
+		&r.Action, &r.QtyGood, &r.QtyScrap, &r.Worker, &r.Note, &r.At)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (s *mysqlStore) ListReports(orderID int64) ([]*model.WorkReport, error) {
+	rows, err := s.db.Query(
+		`SELECT `+reportCols+` FROM work_reports WHERE order_id = ? ORDER BY id`, orderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*model.WorkReport, 0, 8)
+	for rows.Next() {
+		r, err := scanReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *mysqlStore) ListAllReports(limit int) ([]*model.WorkReport, error) {
+	q := `SELECT ` + reportCols + ` FROM work_reports ORDER BY id DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = s.db.Query(q+` LIMIT ?`, limit)
+	} else {
+		rows, err = s.db.Query(q)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*model.WorkReport, 0, 64)
+	for rows.Next() {
+		r, err := scanReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

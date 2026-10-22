@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { api, type ApiDrawing, type ApiOrder, type ApiOrderItem } from '../lib/api'
+import { useEffect, useState, type ReactNode } from 'react'
+import { api, type ApiDrawing, type ApiOrder, type ApiOrderItem, type ApiWorkReport } from '../lib/api'
 import { groupWorkOrder, laborText, orderToCsv, sizeText, workOrderTotals } from '../lib/order'
 import { downloadText } from '../lib/export'
 
@@ -27,6 +27,63 @@ async function saveDrawing(d: ApiDrawing) {
   }
 }
 
+/** 报工二维码内容：生产端 H5 报工页地址 + 单号（工人扫码直达本单） */
+function reportUrl(orderNo: string): string {
+  return `${window.location.origin}${window.location.pathname}#/report?order=${encodeURIComponent(orderNo)}`
+}
+
+/** 生成二维码 dataURL（面板展示与打印纸样共用）。
+ *  qrcode 库走动态 import：只有生产端真正渲染工单时才加载，
+ *  销售端虽然也打包了 WorkOrder 但不会下载这块代码。 */
+function useReportQr(orderNo: string): string {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    let alive = true
+    import('qrcode')
+      .then((QRCode) => QRCode.toDataURL(reportUrl(orderNo), { width: 320, margin: 1 }))
+      .then((d) => {
+        if (alive) setUrl(d)
+      })
+      .catch(() => {
+        /* 生成失败仅不展示二维码，不影响工单其余内容 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [orderNo])
+  return url
+}
+
+/** 拉取本单报工流水，按工单行汇总合格/废品（下标对齐 order.items） */
+function useItemProgress(order: ApiOrder): Map<number, { good: number; scrap: number }> {
+  const [map, setMap] = useState<Map<number, { good: number; scrap: number }>>(new Map())
+  const orderId = order.id
+  useEffect(() => {
+    let alive = true
+    api
+      .listReports(orderId)
+      .then((reports: ApiWorkReport[]) => {
+        if (!alive) return
+        const m = new Map<number, { good: number; scrap: number }>()
+        for (const r of reports) {
+          if (r.action !== 'complete') continue
+          const prev = m.get(r.itemIndex) ?? { good: 0, scrap: 0 }
+          prev.good += r.qtyGood
+          prev.scrap += r.qtyScrap
+          m.set(r.itemIndex, prev)
+        }
+        setMap(m)
+      })
+      .catch(() => {
+        /* 无报工记录或服务不可用时保持空表 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [orderId])
+  return map
+}
+
 /**
  * 生产工单面板（嵌在订单卡片内）。
  * 按车间拆单分组，展示规格快照：型号、定制后毫米尺寸、材质色号、工艺、包装、工时、图纸与三视图。
@@ -35,6 +92,10 @@ export function WorkOrderPanel({ order, onPrint }: { order: ApiOrder; onPrint: (
   const groups = groupWorkOrder(order.items)
   const totals = workOrderTotals(order.items)
   const noSpec = order.items.every((it) => !it.spec)
+  const qr = useReportQr(order.orderNo)
+  // 分组保留了原 items 的对象引用，用 Map 反查行下标对齐报工进度
+  const indexByItem = new Map<ApiOrderItem, number>(order.items.map((it, i) => [it, i]))
+  const progress = useItemProgress(order)
 
   return (
     <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
@@ -43,6 +104,14 @@ export function WorkOrderPanel({ order, onPrint }: { order: ApiOrder; onPrint: (
         <span className="text-[11px] text-slate-500">
           {groups.length} 个车间 · {totals.pieces} 件 · 工时合计 {laborText(totals.laborMinutes)}
         </span>
+        {qr && (
+          <img
+            src={qr}
+            alt="扫码报工二维码"
+            title="工人扫码进入 H5 报工页"
+            className="h-14 w-14 rounded border border-white/20 bg-white p-0.5"
+          />
+        )}
         <div className="ml-auto flex gap-1.5">
           <button
             onClick={() => exportCsv(order)}
@@ -80,6 +149,7 @@ export function WorkOrderPanel({ order, onPrint }: { order: ApiOrder; onPrint: (
             <div className="mt-2 space-y-2">
               {g.items.map((it, i) => {
                 const s = it.spec
+                const p = progress.get(indexByItem.get(it) ?? -1)
                 return (
                   <div key={i} className="rounded-lg bg-white/[0.03] p-2">
                     <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -89,6 +159,16 @@ export function WorkOrderPanel({ order, onPrint }: { order: ApiOrder; onPrint: (
                       {isCustomSize(it) && (
                         <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
                           非标 ×{it.scale.toFixed(2)}
+                        </span>
+                      )}
+                      {p && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${
+                            p.good >= it.qty ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300'
+                          }`}
+                        >
+                          报工 合格 {p.good}/{it.qty}
+                          {p.scrap > 0 ? ` · 废 ${p.scrap}` : ''}
                         </span>
                       )}
                       {s && (
@@ -191,6 +271,7 @@ function Field({ k, v, wide }: { k: string; v: ReactNode; wide?: boolean }) {
 export function WorkOrderSheet({ order, onClose }: { order: ApiOrder; onClose: () => void }) {
   const groups = groupWorkOrder(order.items)
   const totals = workOrderTotals(order.items)
+  const qr = useReportQr(order.orderNo)
 
   return (
     <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/70 p-4">
@@ -228,6 +309,12 @@ export function WorkOrderSheet({ order, onClose }: { order: ApiOrder; onClose: (
             <p>联系：{order.customer.phone}</p>
             {order.customer.note && <p>备注：{order.customer.note}</p>}
           </div>
+          {qr && (
+            <figure className="text-center">
+              <img src={qr} alt="扫码报工二维码" className="h-[92px] w-[92px]" />
+              <figcaption className="mt-0.5 text-[10px] text-slate-600">扫码报工</figcaption>
+            </figure>
+          )}
         </div>
 
         <p className="mt-2 text-[12px] text-slate-700">

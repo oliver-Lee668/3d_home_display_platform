@@ -6,6 +6,8 @@ import { Inspector } from './ui/Inspector'
 import { Toast, RoamHint, HelpBar, PhotoRef } from './ui/Overlays'
 import { AdminConsole } from './ui/AdminConsole'
 import { LoginGate } from './ui/LoginGate'
+import { WorkReportH5 } from './ui/WorkReportH5'
+import { ShopBoard } from './ui/ShopBoard'
 import { useSceneStore } from './store/useSceneStore'
 import { useCatalogStore } from './store/useCatalogStore'
 import { APP_ROLE } from './lib/appRole'
@@ -15,14 +17,35 @@ const ROT_STEP = Math.PI / 12 // 15°
 export default function App() {
   // 构建期角色分流：销售/生产产物只渲染各自确认台；客户产物不含任何管理台入口
   // 员工端额外过一道登录门禁（真正的权限仍在后端逐请求校验）
-  if (APP_ROLE === 'sales' || APP_ROLE === 'production') {
+  if (APP_ROLE === 'sales') {
     return (
-      <LoginGate endpoint={APP_ROLE}>
-        <AdminConsole role={APP_ROLE} />
+      <LoginGate endpoint="sales">
+        <AdminConsole role="sales" />
+      </LoginGate>
+    )
+  }
+  if (APP_ROLE === 'production') {
+    return (
+      <LoginGate endpoint="production">
+        <ProductionApp />
       </LoginGate>
     )
   }
   return <ShowroomApp />
+}
+
+/** 生产端：hash 分流——确认台 / H5 扫码报工 / 车间看板 */
+function ProductionApp() {
+  const [hash, setHash] = useState(() => window.location.hash)
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  if (hash.startsWith('#/report')) return <WorkReportH5 />
+  if (hash.startsWith('#/board')) return <ShopBoard />
+  return <AdminConsole role="production" />
 }
 
 /** 客户展示端：浏览 / 定制 / 下单 / 查单 */

@@ -75,6 +75,11 @@ func main() {
 	mux.HandleFunc("GET /api/orders", staff(handleListOrders))
 	mux.HandleFunc("GET /api/orders/{id}", staff(handleGetOrder))
 	mux.HandleFunc("PATCH /api/orders/{id}/status", staff(handleUpdateStatus))
+	// ---- 车间执行层：报工仅生产/管理员；流水与看板任意员工可读 ----
+	prodOnly := staffRoles(model.RoleProduction, model.RoleAdmin)
+	mux.HandleFunc("POST /api/reports", prodOnly(handleAddReport))
+	mux.HandleFunc("GET /api/reports", staff(handleListReports))
+	mux.HandleFunc("GET /api/dashboard", staff(handleDashboard))
 	mux.HandleFunc("POST /api/users", adminOnly(handleCreateUser))
 	mux.HandleFunc("POST /api/admin/entries", salesOnly(handleUpsertEntry))
 	mux.HandleFunc("PUT /api/admin/entries/{entryId}", salesOnly(handleUpsertEntryPath))

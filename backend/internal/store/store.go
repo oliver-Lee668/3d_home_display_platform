@@ -35,4 +35,11 @@ type Store interface {
 	UpdateUserPassword(id int64, hash string) error
 	// CountUsers 账号总数（首次启动播种默认账号用）
 	CountUsers() (int, error)
+
+	// AddReport 写入一条车间报工记录（实现负责分配 ID 与时间）
+	AddReport(r *model.WorkReport) error
+	// ListReports 按订单读取报工流水（时间正序）
+	ListReports(orderID int64) ([]*model.WorkReport, error)
+	// ListAllReports 全部报工流水（时间倒序）；limit <= 0 表示不限
+	ListAllReports(limit int) ([]*model.WorkReport, error)
 }

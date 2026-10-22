@@ -49,3 +49,22 @@ CREATE TABLE IF NOT EXISTS users (
   PRIMARY KEY (id),
   UNIQUE KEY uk_username (username)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 车间报工流水：执行层留痕（开工/完工报数），看板与工单进度均由此汇总
+CREATE TABLE IF NOT EXISTS work_reports (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id      BIGINT UNSIGNED NOT NULL,
+  order_no      VARCHAR(32)     NOT NULL,
+  item_index    INT             NOT NULL,           -- 订单行下标（工单行）
+  item_name     VARCHAR(128)    NOT NULL DEFAULT '',
+  workshop      VARCHAR(64)     NOT NULL DEFAULT '', -- 写入时冗余的车间分组
+  action        VARCHAR(16)     NOT NULL,           -- start / complete
+  qty_good      INT             NOT NULL DEFAULT 0,
+  qty_scrap     INT             NOT NULL DEFAULT 0,
+  worker        VARCHAR(64)     NOT NULL,           -- 取自登录 token，不可手填
+  note          VARCHAR(255)    NOT NULL DEFAULT '',
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_report_order (order_id),
+  KEY idx_report_created (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
